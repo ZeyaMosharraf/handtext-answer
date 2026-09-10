@@ -5,6 +5,7 @@ import {
   Check,
   CloudOff,
   Highlighter,
+  Italic,
   Loader2,
   PenLine,
   Redo2,
@@ -20,6 +21,7 @@ import { toast } from "sonner";
 import { AiAssistant } from "@/components/editor/AiAssistant";
 import { DesignPanel } from "@/components/editor/DesignPanel";
 import { ResultView } from "@/components/editor/ResultView";
+import { RichContentEditor, type FormatState, type RichContentEditorHandle } from "@/components/editor/RichContentEditor";
 import { Button, Card, Input, Spinner, Textarea } from "@/components/ui/primitives";
 import {
   getGenerator,
@@ -29,6 +31,7 @@ import {
   type GeneratedPage,
   type HandwritingSettings,
 } from "@/lib/handwriting";
+import { migrateLegacyContentToHtml } from "@/lib/handwriting/parse";
 import { recordUsage, updateProject, type Project } from "@/lib/projects";
 import { loadTemplates, persistTemplates, type SavedTemplate } from "@/lib/templates";
 import { cn } from "@/lib/utils";
@@ -55,14 +58,22 @@ interface Draft {
 
 export function EditorWorkspace({ project }: { project: Project }) {
   const [name, setName] = useState(project.name);
-  const [draft, setDraft] = useState<Draft>({
+  const [draft, setDraft] = useState<Draft>(() => ({
     question: project.question,
-    content: project.content,
+    content: migrateLegacyContentToHtml(project.content),
     settings: project.settings,
-  });
+  }));
   const { question, content, settings } = draft;
   const [assignmentMode, setAssignmentMode] = useState(Boolean(project.question));
   const [tab, setTab] = useState<Tab>("content");
+
+  const richEditorRef = useRef<RichContentEditorHandle>(null);
+  const [formatState, setFormatState] = useState<FormatState>({
+    bold: false,
+    italic: false,
+    underline: false,
+    blackInk: false,
+  });
 
   const past = useRef<Draft[]>([]);
   const future = useRef<Draft[]>([]);
@@ -138,7 +149,6 @@ export function EditorWorkspace({ project }: { project: Project }) {
   const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
   const firstRun = useRef(true);
 
-  const contentRef = useRef<HTMLTextAreaElement>(null);
   const [tableRows, setTableRows] = useState(4);
   const [tableCols, setTableCols] = useState(3);
 
@@ -208,36 +218,8 @@ export function EditorWorkspace({ project }: { project: Project }) {
 
   /* --------------------------------- actions -------------------------------- */
   const insertTable = () => {
-    const rows = Math.max(1, Math.min(20, tableRows));
-    const cols = Math.max(1, Math.min(8, tableCols));
-    const header = Array.from({ length: cols }, (_, c) => `Column ${c + 1}`);
-    const lines = [`| ${header.join(" | ")} |`, `|${header.map(() => "---").join("|")}|`];
-    for (let r = 1; r < rows; r++) lines.push(`| ${Array.from({ length: cols }, () => " ").join("| ")}|`);
-    const snippet = `\n${lines.join("\n")}\n`;
-    const el = contentRef.current;
-    const at = el ? el.selectionStart : content.length;
-    commit((prev) => ({ ...prev, content: prev.content.slice(0, at) + snippet + prev.content.slice(at) }));
+    richEditorRef.current?.insertTable(tableRows, tableCols);
     toast.success("Table added — edit the cells in your answer.");
-  };
-
-  /** Wraps the selected words in an inline marker: **bold**, __underline__, ==black==. */
-  const applyFormat = (marker: "**" | "__" | "==") => {
-    const el = writeOnPage && onPageRef.current ? onPageRef.current : contentRef.current;
-    if (!el) return;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    if (start === end) {
-      toast.info("Select the words you want to change first.");
-      el.focus();
-      return;
-    }
-    const selected = content.slice(start, end);
-    const next = `${content.slice(0, start)}${marker}${selected}${marker}${content.slice(end)}`;
-    commit((p) => ({ ...p, content: next }));
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(start + marker.length, end + marker.length);
-    });
   };
 
   const generate = useCallback(async () => {
@@ -369,28 +351,59 @@ export function EditorWorkspace({ project }: { project: Project }) {
             />
           )}
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" size="sm" onClick={() => applyFormat("**")} title="Bold the selected words">
-              <Bold className="size-4" />
-              Bold
+          <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card p-1.5 shadow-sm">
+            <Button
+              type="button"
+              variant={formatState.bold ? "primary" : "secondary"}
+              size="sm"
+              onClick={() => richEditorRef.current?.toggleBold()}
+              title="Bold (Ctrl+B)"
+              className="h-8 gap-1.5 px-2.5 text-xs font-medium transition-all"
+            >
+              <Bold className="size-3.5" />
+              <span>Bold</span>
             </Button>
-            <Button variant="secondary" size="sm" onClick={() => applyFormat("__")} title="Underline the selected words">
-              <Underline className="size-4" />
-              Underline
+            <Button
+              type="button"
+              variant={formatState.italic ? "primary" : "secondary"}
+              size="sm"
+              onClick={() => richEditorRef.current?.toggleItalic()}
+              title="Italic (Ctrl+I)"
+              className="h-8 gap-1.5 px-2.5 text-xs font-medium transition-all"
+            >
+              <Italic className="size-3.5" />
+              <span>Italic</span>
             </Button>
-            <Button variant="secondary" size="sm" onClick={() => applyFormat("==")} title="Write the selection in black">
-              <Highlighter className="size-4" />
-              Black ink
+            <Button
+              type="button"
+              variant={formatState.underline ? "primary" : "secondary"}
+              size="sm"
+              onClick={() => richEditorRef.current?.toggleUnderline()}
+              title="Underline (Ctrl+U)"
+              className="h-8 gap-1.5 px-2.5 text-xs font-medium transition-all"
+            >
+              <Underline className="size-3.5" />
+              <span>Underline</span>
+            </Button>
+            <Button
+              type="button"
+              variant={formatState.blackInk ? "primary" : "secondary"}
+              size="sm"
+              onClick={() => richEditorRef.current?.toggleBlackInk()}
+              title="Black ink emphasis"
+              className="h-8 gap-1.5 px-2.5 text-xs font-medium transition-all"
+            >
+              <Highlighter className="size-3.5" />
+              <span>Black ink</span>
             </Button>
           </div>
 
-          <Textarea
-            ref={contentRef}
+          <RichContentEditor
+            ref={richEditorRef}
             value={content}
-            onChange={(e) => commit((p) => ({ ...p, content: e.target.value }))}
-            aria-label="Answer"
-            placeholder={PLACEHOLDER}
-            className="min-h-[40vh] lg:min-h-[52vh]"
+            onChange={(html) => commit((p) => ({ ...p, content: html }))}
+            onFormatChange={setFormatState}
+            placeholder="Write or paste your answer here..."
           />
 
           <Card className="flex flex-wrap items-end gap-2 p-3">
@@ -429,9 +442,8 @@ export function EditorWorkspace({ project }: { project: Project }) {
           </Card>
 
           <p className="text-xs text-muted-foreground">
-            Use <code># Heading</code>, <code>## Subheading</code>, <code>- bullet</code>, <code>1. numbered</code>,{" "}
-            <code>&gt; quote</code>, <code>---</code> for a divider and <code>| a | b |</code> rows for handwritten tables.
-            For emphasis: <code>**bold**</code>, <code>__underline__</code>, <code>==black ink==</code>.
+            Rich-text formatting: <code>Ctrl+B</code> for bold, <code>Ctrl+I</code> for italic, <code>Ctrl+U</code> for underline.
+            Click toolbar buttons or use keyboard shortcuts to format text cleanly without markup markers.
           </p>
 
           <AiAssistant answer={content} onUse={(text) => commit((p) => ({ ...p, content: text }))} />
@@ -475,7 +487,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
                   return (
                     <textarea
                       ref={onPageRef}
-                      value={content}
+                      value={content.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ")}
                       onChange={(e) => commit((p) => ({ ...p, content: e.target.value }))}
                       aria-label="Write directly on the page"
                       spellCheck={false}
@@ -497,7 +509,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
           </Card>
           {writeOnPage && (
             <p className="text-xs text-muted-foreground">
-              Type straight on the sheet — your handwriting appears as you pause. Use the Bold, Underline and Black ink
+              Type straight on the sheet — your handwriting appears as you pause. Use the Bold, Italic, Underline and Black ink
               buttons on the left for emphasis.
             </p>
           )}

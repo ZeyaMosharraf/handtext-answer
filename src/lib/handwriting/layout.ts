@@ -166,7 +166,7 @@ function segmentsWidth(ctx: CanvasRenderingContext2D, segs: Seg[], settings: Han
 }
 
 function plainSegments(text: string): Seg[] {
-  return text ? [{ text, bold: false, underline: false }] : [];
+  return text ? [{ text, bold: false, underline: false, italic: false }] : [];
 }
 
 function wrapSegments(

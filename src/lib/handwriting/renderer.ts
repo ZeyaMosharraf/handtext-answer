@@ -58,7 +58,7 @@ interface PenOptions {
 }
 
 function plainSegments(text: string): Seg[] {
-  return text ? [{ text, bold: false, underline: false }] : [];
+  return text ? [{ text, bold: false, underline: false, italic: false }] : [];
 }
 
 function handUnderline(
@@ -71,14 +71,25 @@ function handUnderline(
   random: () => number,
 ) {
   if (to <= from) return;
+  const width = to - from;
+  const jitterStart = (random() - 0.5) * 3;
+  const jitterEnd = (random() - 0.5) * 3;
+  const midY = y + (random() - 0.5) * 2;
+
   ctx.save();
-  ctx.strokeStyle = color;
-  ctx.globalAlpha = settings.inkIntensity * 0.85;
-  ctx.lineWidth = 1.6;
   ctx.beginPath();
-  ctx.moveTo(from, y);
-  for (let x = from; x < to; x += 14) ctx.lineTo(x, y + (random() - 0.5) * 1.6);
-  ctx.lineTo(to, y);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(0.6, settings.penWidth * 0.7);
+  ctx.globalAlpha = Math.min(1, settings.inkIntensity * 0.95);
+  ctx.moveTo(from, y + jitterStart);
+  ctx.bezierCurveTo(
+    from + width * 0.35,
+    midY,
+    from + width * 0.7,
+    midY + (random() - 0.5) * 2,
+    to,
+    y + jitterEnd,
+  );
   ctx.stroke();
   ctx.restore();
 }
@@ -91,7 +102,7 @@ function writeSegments(
   baselineY: number,
   random: () => number,
   pen: PenOptions,
-) {
+): number {
   if (!segments.some((segment) => segment.text.trim().length > 0)) return baseX;
   let x = baseX;
   const scale = pen.scale ?? 1;
@@ -115,13 +126,14 @@ function writeSegments(
       const sizeJitter = 1 + (random() - 0.5) * 0.07 * settings.charVariation;
       const widthJitter = 1 + (random() - 0.5) * 0.05 * settings.charVariation;
       const size = pen.size * sizeJitter;
-      const slant = (settings.slant + (random() - 0.5) * settings.slantVariation + speed * 1.2) * (Math.PI / 180);
+      const italicSlant = segment.italic ? 12 : 0;
+      const slant = (settings.slant + italicSlant + (random() - 0.5) * settings.slantVariation + speed * 1.2) * (Math.PI / 180);
       const rotation = (random() - 0.5) * 0.012 * settings.imperfection * 6;
       const characterBaselineJitter = (random() - 0.5) * settings.baselineVariation;
       const horizontal = settings.compactness * widthJitter * (1 - speed * 0.06);
 
       ctx.save();
-      ctx.font = `${size}px "${settings.fontFamily}", cursive`;
+      ctx.font = `${segment.italic ? "italic " : ""}${size}px "${settings.fontFamily}", cursive`;
       ctx.fillStyle = color;
       ctx.globalAlpha = Math.min(1, (segment.bold ? 1 : settings.inkIntensity) + (random() - 0.5) * 0.22 * settings.inkVariation);
       ctx.translate(x, baselineY + characterBaselineJitter);
@@ -141,7 +153,7 @@ function writeSegments(
       ctx.fillText(character, 0, 0);
       ctx.restore();
 
-      ctx.font = `${size}px "${settings.fontFamily}", cursive`;
+      ctx.font = `${segment.italic ? "italic " : ""}${size}px "${settings.fontFamily}", cursive`;
       x += ctx.measureText(character).width * horizontal + settings.letterSpacing * scale * (1 - speed * 0.3);
     }
     if (segment.underline) handUnderline(ctx, settings, segmentStart, x, baselineY + 7, color, random);
