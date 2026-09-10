@@ -53,17 +53,18 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 const ELEMENT_KINDS: { id: ElementKind; label: string }[] = [
-  { id: "text", label: "Custom text" },
-  { id: "studentName", label: "Student name" },
+  { id: "studentName", label: "Name" },
   { id: "enrollment", label: "Enrollment number" },
   { id: "roll", label: "Roll number" },
+  { id: "courseCode", label: "Course" },
   { id: "subject", label: "Subject" },
-  { id: "courseCode", label: "Course code" },
+  { id: "college", label: "College/University" },
+  { id: "date", label: "Date" },
+  { id: "pageNumber", label: "Page number" },
   { id: "teacherName", label: "Teacher name" },
   { id: "assignment", label: "Assignment number" },
   { id: "signature", label: "Teacher signature" },
-  { id: "date", label: "Date" },
-  { id: "pageNumber", label: "Page number" },
+  { id: "text", label: "Custom text" },
 ];
 
 const PAGE_NUMBER_FORMATS: { id: PageNumberFormat; label: string }[] = [
@@ -548,7 +549,7 @@ function BandEditor({
   band: BandConfig;
   onChange: (patch: Partial<BandConfig>) => void;
 }) {
-  const [kind, setKind] = useState<ElementKind>("text");
+  const [kind, setKind] = useState<ElementKind>(which === "header" ? "date" : "pageNumber");
 
   const updateElement = (id: string, patch: Partial<PageElement>) =>
     onChange({ elements: band.elements.map((el) => (el.id === id ? { ...el, ...patch } : el)) });
@@ -622,7 +623,7 @@ function BandEditor({
             onClick={() =>
               onChange({
                 enabled: true,
-                elements: [...band.elements, newElement(kind, { row: Math.min(3, band.elements.length) })],
+                elements: [...band.elements, newElement(kind)],
               })
             }
           >
@@ -632,7 +633,7 @@ function BandEditor({
         </div>
 
         {band.elements.length === 0 && (
-          <p className="text-xs text-muted-foreground">No fields yet — add a name, enrollment number or page number.</p>
+          <p className="text-xs text-muted-foreground">No fields yet — select a field type and click Add.</p>
         )}
 
         <ul className="space-y-3">
@@ -659,7 +660,27 @@ function BandEditor({
                 </Button>
               </div>
 
-              {el.kind !== "pageNumber" && (
+              {el.kind === "pageNumber" ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    value={el.label}
+                    aria-label="Field label"
+                    placeholder="Label (e.g. Page No.)"
+                    onChange={(e) => updateElement(el.id, { label: e.target.value })}
+                  />
+                  <Select
+                    aria-label="Page number format"
+                    value={el.format ?? "n"}
+                    onChange={(e) => updateElement(el.id, { format: e.target.value as PageNumberFormat })}
+                  >
+                    {PAGE_NUMBER_FORMATS.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              ) : (
                 <div className="grid grid-cols-2 gap-2">
                   <Input
                     value={el.label}
@@ -670,24 +691,10 @@ function BandEditor({
                   <Input
                     value={el.value}
                     aria-label="Field value"
-                    placeholder="Value"
+                    placeholder="Value (optional)"
                     onChange={(e) => updateElement(el.id, { value: e.target.value })}
                   />
                 </div>
-              )}
-
-              {el.kind === "pageNumber" && (
-                <Select
-                  aria-label="Page number format"
-                  value={el.format ?? "page-n"}
-                  onChange={(e) => updateElement(el.id, { format: e.target.value as PageNumberFormat })}
-                >
-                  {PAGE_NUMBER_FORMATS.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.label}
-                    </option>
-                  ))}
-                </Select>
               )}
 
               <div className="grid grid-cols-3 gap-2">

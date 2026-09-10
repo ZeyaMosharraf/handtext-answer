@@ -29,6 +29,7 @@ export type ElementKind =
   | "roll"
   | "subject"
   | "courseCode"
+  | "college"
   | "teacherName"
   | "assignment"
   | "signature"
@@ -249,32 +250,34 @@ export const DEFAULT_PAGE: PageConfig = {
 };
 
 export function newElement(kind: ElementKind, partial: Partial<PageElement> = {}): PageElement {
-  const defaults: Record<ElementKind, { label: string; value: string }> = {
-    text: { label: "", value: "Custom text" },
-    studentName: { label: "Student", value: "" },
-    enrollment: { label: "Enrollment No", value: "" },
-    roll: { label: "Roll No", value: "" },
-    subject: { label: "Subject", value: "" },
-    courseCode: { label: "Course Code", value: "" },
-    teacherName: { label: "Teacher", value: "" },
-    assignment: { label: "Assignment", value: "" },
-    signature: { label: "Teacher's Signature", value: "______________" },
-    date: { label: "Date", value: "" },
-    pageNumber: { label: "", value: "" },
+  const defaults: Record<ElementKind, { label: string; value: string; slot: Slot; row: number }> = {
+    studentName: { label: "Name", value: "", slot: "left", row: 0 },
+    enrollment: { label: "Enrollment No", value: "", slot: "left", row: 1 },
+    roll: { label: "Roll No", value: "", slot: "left", row: 1 },
+    courseCode: { label: "Course", value: "", slot: "left", row: 2 },
+    subject: { label: "Subject", value: "", slot: "left", row: 2 },
+    college: { label: "College", value: "", slot: "left", row: 3 },
+    date: { label: "Date", value: "", slot: "right", row: 0 },
+    pageNumber: { label: "Page No.", value: "", slot: "right", row: 1 },
+    teacherName: { label: "Teacher", value: "", slot: "left", row: 2 },
+    assignment: { label: "Assignment", value: "", slot: "left", row: 0 },
+    signature: { label: "Teacher's Signature", value: "______________", slot: "right", row: 0 },
+    text: { label: "", value: "Custom text", slot: "left", row: 0 },
   };
+  const def = defaults[kind] ?? { label: "", value: "", slot: "left", row: 0 };
   return {
     id: `el_${Math.random().toString(36).slice(2, 9)}`,
     kind,
-    label: defaults[kind].label,
-    value: defaults[kind].value,
-    slot: "left",
-    row: 0,
-    fontSize: 22,
+    label: def.label,
+    value: def.value,
+    slot: def.slot,
+    row: def.row,
+    fontSize: 20,
     color: "#333333",
     handwritten: false,
     enabled: true,
     applyTo: "all",
-    ...(kind === "pageNumber" ? { format: "page-n" as PageNumberFormat } : {}),
+    ...(kind === "pageNumber" ? { format: "n" as PageNumberFormat } : {}),
     ...partial,
   };
 }
@@ -282,7 +285,7 @@ export function newElement(kind: ElementKind, partial: Partial<PageElement> = {}
 export const DEFAULT_HEADER: BandConfig = {
   enabled: false,
   applyTo: "all",
-  height: 150,
+  height: 140,
   borderTop: false,
   borderBottom: true,
   borderColor: "#c9ced6",
@@ -530,6 +533,30 @@ export const PAGE_TEMPLATES: PageTemplate[] = [
         margin: { enabled: true, color: "#d77a7a", position: 96, thickness: 1.5 },
       },
       header: { ...s.header, enabled: false },
+      footer: { ...s.footer, enabled: false },
+    }),
+  },
+  {
+    id: "assignment",
+    name: "Ruled Assignment Sheet",
+    description: "Physical assignment sheet with Date & Page box and red margin.",
+    build: (s) => ({
+      ...s,
+      paper: "ruled",
+      page: {
+        ...s.page,
+        paperColor: "#fbfbf9",
+        ruling: { enabled: true, color: "#a7bfe8", opacity: 0.6, thickness: 1 },
+        margin: { enabled: true, color: "#d77a7a", position: 100, thickness: 1.5 },
+      },
+      header: band(
+        s.header,
+        [
+          newElement("date", { slot: "right", row: 0 }),
+          newElement("pageNumber", { slot: "right", row: 1, format: "n" }),
+        ],
+        { enabled: true, height: 140, borderTop: false, borderBottom: true, borderColor: "#a7bfe8" },
+      ),
       footer: { ...s.footer, enabled: false },
     }),
   },

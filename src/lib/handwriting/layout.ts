@@ -114,10 +114,16 @@ export const BAND_PAD_BOTTOM = 18;
 export const BAND_ROW_HEIGHT = 40;
 
 export function bandElementText(element: PageElement, pageNumber: number, totalPages: number) {
-  if (element.kind === "pageNumber") return formatPageNumber(element.format, pageNumber, totalPages).trim();
+  if (element.kind === "pageNumber") {
+    const formatted = formatPageNumber(element.format, pageNumber, totalPages).trim();
+    if (element.label?.trim()) {
+      return `${element.label.trim()}: ${formatted}`;
+    }
+    return formatted;
+  }
   const value = element.value.trim();
-  if (element.label && value) return `${element.label}: ${value}`;
-  if (element.label) return `${element.label}: ______________`;
+  if (element.label?.trim() && value) return `${element.label.trim()}: ${value}`;
+  if (element.label?.trim()) return `${element.label.trim()}: ______________`;
   return value;
 }
 
@@ -227,20 +233,30 @@ function activeCoordinateSystem(
 ): PageCoordinateSystem {
   const { w, h } = pageDimensions(settings.page);
   const rulingSpacing = settings.fontSize * settings.lineSpacing;
-  const headerHeight = bandHeight(settings.header, pageNumber, totalPages);
-  const footerHeight = bandHeight(settings.footer, pageNumber, totalPages);
-  const marginRuleRight = settings.page.margin.enabled ? settings.page.margin.position + rulingSpacing * 0.5 : 0;
-  const contentLeft = Math.max(settings.marginLeft, marginRuleRight);
-  const contentRight = w - settings.marginRight;
-  // An active band replaces the normal margin instead of stacking on top of it.
-  const contentTop = headerHeight > 0 ? Math.max(settings.marginTop, headerHeight + 18) : settings.marginTop;
-  const contentBottom = footerHeight > 0 ? Math.min(h - settings.marginBottom, h - footerHeight - 18) : h - settings.marginBottom;
 
-  ctx.font = fontString(settings, KIND_SCALE.heading);
-  const metrics = ctx.measureText("Ag");
-  const measuredAscent = metrics.actualBoundingBoxAscent || settings.fontSize * KIND_SCALE.heading * 0.8;
-  const measuredDescent = metrics.actualBoundingBoxDescent || settings.fontSize * KIND_SCALE.heading * 0.2;
-  const baselineOffset = Math.min(rulingSpacing, Math.ceil(measuredAscent + Math.min(3, measuredDescent * 0.25)));
+  // Header geometry: align header boundary to master ruling lattice
+  const rawHeaderHeight = bandHeight(settings.header, pageNumber, totalPages);
+  const headerHeight = rawHeaderHeight > 0 ? Math.max(2, Math.round(rawHeaderHeight / rulingSpacing)) * rulingSpacing : 0;
+
+  // Footer geometry: align footer boundary to master ruling lattice
+  const rawFooterHeight = bandHeight(settings.footer, pageNumber, totalPages);
+  const footerHeight = rawFooterHeight > 0 ? Math.max(1, Math.round(rawFooterHeight / rulingSpacing)) * rulingSpacing : 0;
+
+  // Margin rule alignment
+  const marginRuleRight = settings.page.margin.enabled ? settings.page.margin.position + 24 : 48;
+  const contentLeft = Math.max(settings.marginLeft, marginRuleRight);
+  const contentRight = w - Math.max(48, settings.marginRight);
+
+  // When header is active: writing starts on the first ruled line below the header boundary.
+  // When header is inactive: writing starts at the top margin aligned to ruling intervals.
+  const contentTop = headerHeight > 0 ? headerHeight : Math.max(1, Math.round(settings.marginTop / rulingSpacing)) * rulingSpacing;
+  const firstBaselineY = headerHeight > 0 ? headerHeight + rulingSpacing : contentTop;
+
+  // Content bottom is strictly bounded by the footer top boundary if enabled.
+  // Main content must stop before the footer region.
+  const contentBottom = footerHeight > 0
+    ? h - footerHeight - 1
+    : Math.floor((h - Math.max(48, settings.marginBottom) - firstBaselineY) / rulingSpacing) * rulingSpacing + firstBaselineY;
 
   return {
     pageWidth: w,
@@ -250,8 +266,8 @@ function activeCoordinateSystem(
     contentTop,
     contentBottom,
     rulingSpacing,
-    firstBaselineY: contentTop + baselineOffset,
-    baselineOffset,
+    firstBaselineY,
+    baselineOffset: 0,
     headerHeight,
     footerHeight,
   };
@@ -268,7 +284,8 @@ export function getNearestBaseline(coordinates: PageCoordinateSystem, y: number)
 }
 
 function lineCapacity(coordinates: PageCoordinateSystem) {
-  return Math.max(1, Math.floor((coordinates.contentBottom - coordinates.firstBaselineY) / coordinates.rulingSpacing) + 1);
+  if (coordinates.contentBottom < coordinates.firstBaselineY) return 0;
+  return Math.floor((coordinates.contentBottom - coordinates.firstBaselineY) / coordinates.rulingSpacing) + 1;
 }
 
 function blockLines(

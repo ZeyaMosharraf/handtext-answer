@@ -13,7 +13,7 @@ import {
   type LayoutTableBounds,
   type PageCoordinateSystem,
 } from "./layout";
-import { inkHex, type BandConfig, type HandwritingSettings } from "./types";
+import { formatPageNumber, inkHex, type BandConfig, type HandwritingSettings } from "./types";
 
 function makeRng(seed: number) {
   let state = seed >>> 0 || 1;
@@ -205,17 +205,9 @@ function paintPaper(
   coordinates: PageCoordinateSystem,
   random: () => number,
 ) {
-  const { pageWidth, pageHeight, rulingSpacing, firstBaselineY } = coordinates;
-  // Header and footer content is written on the same continuous sheet. Paper
-  // ruling and the margin rule therefore continue behind active bands too.
+  const { pageWidth, pageHeight, rulingSpacing, firstBaselineY, headerHeight, footerHeight, contentBottom } = coordinates;
   const paperTop = 0;
   const paperBottom = pageHeight;
-  const contentBottom = paperBottom;
-  // Keep the entire sheet on the same grid while preserving the first content
-  // baseline. This avoids detached-looking header and footer sections.
-  const gridStart = (step: number) => {
-    return firstBaselineY - Math.floor((firstBaselineY - paperTop) / step) * step;
-  };
   ctx.fillStyle = settings.page.paperColor;
   ctx.fillRect(0, 0, pageWidth, pageHeight);
 
@@ -242,7 +234,7 @@ function paintPaper(
         ctx.lineTo(x, paperBottom);
         ctx.stroke();
       }
-      for (let y = gridStart(step); y <= contentBottom; y += step) {
+      for (let y = firstBaselineY; y <= contentBottom; y += step) {
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(pageWidth, y);
@@ -252,7 +244,7 @@ function paintPaper(
       const step = rulingSpacing / 2;
       ctx.save();
       ctx.fillStyle = withAlpha(ruling.color, Math.min(1, ruling.opacity + 0.15));
-      for (let y = gridStart(step); y <= contentBottom; y += step) {
+      for (let y = firstBaselineY; y <= contentBottom; y += step) {
         for (let x = step; x < pageWidth; x += step) {
           ctx.beginPath();
           ctx.arc(x, y, Math.max(0.9, ruling.thickness), 0, Math.PI * 2);
@@ -261,9 +253,14 @@ function paintPaper(
       }
       ctx.restore();
     } else {
-      const left = settings.paper === "exam" ? 0 : 40;
-      const right = pageWidth - 40;
-      for (let y = gridStart(rulingSpacing); y <= contentBottom; y += rulingSpacing) {
+      // Real physical ruled notebook paper:
+      // Ruled writing lines run across the writing area from pad to pad, crossing the vertical red margin line.
+      // They begin strictly below the header area on the master ruling lattice.
+      const left = settings.paper === "exam" ? 0 : 36;
+      const right = settings.paper === "exam" ? pageWidth : pageWidth - 36;
+      const lastRuledY = footerHeight > 0 ? pageHeight - footerHeight - 1 : contentBottom;
+
+      for (let y = firstBaselineY; y <= lastRuledY; y += rulingSpacing) {
         ctx.beginPath();
         ctx.moveTo(left, y);
         ctx.lineTo(right, y);
@@ -329,52 +326,149 @@ function drawBand(
   const isHeader = band === settings.header;
   const activeHeight = isHeader ? coordinates.headerHeight : coordinates.footerHeight;
   if (activeHeight <= 0) return;
-  const pad = 48;
-  const rowHeight = BAND_ROW_HEIGHT;
-  const left = Math.max(pad, settings.page.margin.enabled ? settings.page.margin.position + 20 : pad);
+  const pad = 36;
+  const left = coordinates.contentLeft;
   const right = coordinates.pageWidth - pad;
 
   const topRule = topY;
   const bottomRule = Math.min(coordinates.pageHeight - 1, topY + activeHeight);
 
+  // Draw borders aligned with physical page coordinate lattice
   ctx.save();
-  ctx.strokeStyle = band.borderColor;
+  ctx.strokeStyle = band.borderColor || withAlpha(settings.page.ruling.color, 0.7);
   ctx.lineWidth = 1.2;
   if (band.borderTop) {
     ctx.beginPath();
-    ctx.moveTo(pad / 2, topRule);
-    ctx.lineTo(coordinates.pageWidth - pad / 2, topRule);
+    ctx.moveTo(pad, topRule);
+    ctx.lineTo(coordinates.pageWidth - pad, topRule);
     ctx.stroke();
   }
   if (band.borderBottom) {
     ctx.beginPath();
-    ctx.moveTo(pad / 2, bottomRule);
-    ctx.lineTo(coordinates.pageWidth - pad / 2, bottomRule);
+    ctx.moveTo(pad, bottomRule);
+    ctx.lineTo(coordinates.pageWidth - pad, bottomRule);
     ctx.stroke();
   }
   ctx.restore();
 
-  for (const element of visibleBandElements(band, pageNumber, totalPages)) {
-    const text = bandElementText(element, pageNumber, totalPages);
-    const requestedBaseline = topY + BAND_PAD_TOP + element.row * rowHeight + element.fontSize * 0.6;
-    const snapped = getNearestBaseline(coordinates, requestedBaseline);
-    const baselineY =
-      snapped >= topY + element.fontSize && snapped <= topY + activeHeight - 6
-        ? snapped
-        : Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
-    if (element.handwritten) {
-      const size = element.fontSize * 1.25;
-      const width = measureHandwritten(ctx, text, settings, size);
-      const x = element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 - width / 2 : right - width;
-      writeText(ctx, text, settings, x, baselineY, random, { size, color: element.color });
-    } else {
+  const visible = visibleBandElements(band, pageNumber, totalPages);
+
+  if (isHeader) {
+    // Separate right-aligned metadata elements (e.g. Date, Page Number) from others
+    const rightElements = visible.filter((el) => el.slot === "right");
+    const otherElements = visible.filter((el) => el.slot !== "right");
+
+    if (rightElements.length > 0) {
+      // Physical assignment-sheet top-right printed metadata box
+      const boxWidth = 230;
+      const boxRight = coordinates.pageWidth - pad;
+      const boxLeft = boxRight - boxWidth;
+      const rowCount = Math.max(1, rightElements.length);
+      const boxRowHeight = Math.min(32, Math.floor((activeHeight - 20) / rowCount));
+      const boxHeight = rowCount * boxRowHeight;
+      const boxTop = Math.max(12, Math.floor((activeHeight - boxHeight) / 2));
+
       ctx.save();
-      ctx.font = `${element.fontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
-      ctx.fillStyle = element.color;
-      ctx.textBaseline = "alphabetic";
-      ctx.textAlign = element.slot === "left" ? "left" : element.slot === "center" ? "center" : "right";
-      ctx.fillText(text, element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 : right, baselineY);
+      ctx.strokeStyle = band.borderColor || withAlpha(settings.page.ruling.color, 0.75);
+      ctx.lineWidth = 1;
+      ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
+      for (let i = 1; i < rowCount; i++) {
+        const lineY = boxTop + i * boxRowHeight;
+        ctx.beginPath();
+        ctx.moveTo(boxLeft, lineY);
+        ctx.lineTo(boxRight, lineY);
+        ctx.stroke();
+      }
       ctx.restore();
+
+      rightElements.forEach((element, index) => {
+        const rowY = boxTop + index * boxRowHeight;
+        const baselineY = rowY + Math.round(boxRowHeight * 0.7);
+        const text = bandElementText(element, pageNumber, totalPages);
+
+        if (element.handwritten) {
+          const label = element.label.trim();
+          const value =
+            element.kind === "pageNumber"
+              ? formatPageNumber(element.format, pageNumber, totalPages)
+              : element.value.trim();
+          if (label && value) {
+            ctx.save();
+            ctx.font = '13px "Plus Jakarta Sans", ui-sans-serif, sans-serif';
+            ctx.fillStyle = withAlpha(element.color, 0.75);
+            ctx.textBaseline = "alphabetic";
+            ctx.fillText(`${label}:`, boxLeft + 8, baselineY);
+            const labelW = ctx.measureText(`${label}: `).width;
+            ctx.restore();
+            writeText(ctx, value, settings, boxLeft + 8 + labelW, baselineY, random, {
+              size: element.fontSize * 1.05,
+              color: element.color,
+            });
+          } else if (label) {
+            ctx.save();
+            ctx.font = '13px "Plus Jakarta Sans", ui-sans-serif, sans-serif';
+            ctx.fillStyle = withAlpha(element.color, 0.75);
+            ctx.textBaseline = "alphabetic";
+            ctx.fillText(`${label}:`, boxLeft + 8, baselineY);
+            ctx.restore();
+          } else {
+            writeText(ctx, text, settings, boxLeft + 8, baselineY, random, {
+              size: element.fontSize * 1.05,
+              color: element.color,
+            });
+          }
+        } else {
+          ctx.save();
+          ctx.font = '13px "Plus Jakarta Sans", ui-sans-serif, sans-serif';
+          ctx.fillStyle = element.color;
+          ctx.textBaseline = "alphabetic";
+          ctx.fillText(text, boxLeft + 8, baselineY);
+          ctx.restore();
+        }
+      });
+    }
+
+    // Left and center aligned elements in header
+    for (const element of otherElements) {
+      const text = bandElementText(element, pageNumber, totalPages);
+      const requestedBaseline = topY + BAND_PAD_TOP + element.row * BAND_ROW_HEIGHT + element.fontSize * 0.6;
+      const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
+      if (element.handwritten) {
+        const size = element.fontSize * 1.2;
+        const width = measureHandwritten(ctx, text, settings, size);
+        const x = element.slot === "left" ? left : coordinates.pageWidth / 2 - width / 2;
+        writeText(ctx, text, settings, x, baselineY, random, { size, color: element.color });
+      } else {
+        ctx.save();
+        ctx.font = `${element.fontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
+        ctx.fillStyle = element.color;
+        ctx.textBaseline = "alphabetic";
+        ctx.textAlign = element.slot === "left" ? "left" : "center";
+        ctx.fillText(text, element.slot === "left" ? left : coordinates.pageWidth / 2, baselineY);
+        ctx.restore();
+      }
+    }
+  } else {
+    // Footer elements: strictly contained within footer boundary
+    for (const element of visible) {
+      const text = bandElementText(element, pageNumber, totalPages);
+      const requestedBaseline = topY + BAND_PAD_TOP + element.row * BAND_ROW_HEIGHT + element.fontSize * 0.6;
+      const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
+      if (element.handwritten) {
+        const size = element.fontSize * 1.2;
+        const width = measureHandwritten(ctx, text, settings, size);
+        const x =
+          element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 - width / 2 : right - width;
+        writeText(ctx, text, settings, x, baselineY, random, { size, color: element.color });
+      } else {
+        ctx.save();
+        ctx.font = `${element.fontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
+        ctx.fillStyle = element.color;
+        ctx.textBaseline = "alphabetic";
+        ctx.textAlign = element.slot === "left" ? "left" : element.slot === "center" ? "center" : "right";
+        ctx.fillText(text, element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 : right, baselineY);
+        ctx.restore();
+      }
     }
   }
 }
