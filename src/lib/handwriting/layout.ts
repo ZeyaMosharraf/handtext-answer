@@ -101,7 +101,7 @@ const KIND_SCALE: Record<BlockKind, number> = {
   blank: 1,
 };
 
-function bandApplies(band: BandConfig, pageNumber: number, totalPages: number) {
+export function bandApplies(band: BandConfig, pageNumber: number, totalPages: number) {
   if (!band.enabled) return false;
   if (band.applyTo === "first") return pageNumber === 1;
   if (band.applyTo === "last") return pageNumber === totalPages;
@@ -130,21 +130,19 @@ function elementApplies(element: PageElement, pageNumber: number, totalPages: nu
 
 /** Elements that actually render on this page (enabled, in scope, non-empty text). */
 export function visibleBandElements(band: BandConfig, pageNumber: number, totalPages: number) {
+  if (!bandApplies(band, pageNumber, totalPages)) return [];
   return band.elements.filter(
     (element) => elementApplies(element, pageNumber, totalPages) && bandElementText(element, pageNumber, totalPages).trim().length > 0,
   );
 }
 
 /**
- * A band only occupies space when it is enabled for this page AND has visible
- * content. Height is measured from the actual rows used, never a fixed reserve.
+ * A band reserves its configured height when enabled and applicable to the page.
+ * When disabled (or outside page scope), it consumes zero layout space.
  */
 export function bandHeight(band: BandConfig, pageNumber: number, totalPages: number) {
   if (!bandApplies(band, pageNumber, totalPages)) return 0;
-  const visible = visibleBandElements(band, pageNumber, totalPages);
-  if (visible.length === 0) return 0;
-  const rows = Math.max(...visible.map((element) => element.row)) + 1;
-  return BAND_PAD_TOP + rows * BAND_ROW_HEIGHT + BAND_PAD_BOTTOM;
+  return Math.max(0, band.height || 0);
 }
 
 function fontString(settings: HandwritingSettings, scale: number) {

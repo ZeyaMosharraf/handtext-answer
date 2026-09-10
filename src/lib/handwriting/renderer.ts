@@ -2,6 +2,7 @@ import { type Seg } from "./parse";
 import {
   BAND_PAD_TOP,
   BAND_ROW_HEIGHT,
+  bandApplies,
   bandElementText,
   createPageCoordinateSystem,
   getBaseline,
@@ -324,15 +325,17 @@ function drawBand(
   totalPages: number,
   random: () => number,
 ) {
-  const activeHeight = topY === 0 ? coordinates.headerHeight : coordinates.footerHeight;
-  if (activeHeight === 0) return;
+  if (!band.enabled || !bandApplies(band, pageNumber, totalPages)) return;
+  const isHeader = band === settings.header;
+  const activeHeight = isHeader ? coordinates.headerHeight : coordinates.footerHeight;
+  if (activeHeight <= 0) return;
   const pad = 48;
   const rowHeight = BAND_ROW_HEIGHT;
   const left = Math.max(pad, settings.page.margin.enabled ? settings.page.margin.position + 20 : pad);
   const right = coordinates.pageWidth - pad;
 
-  const topRule = getNearestBaseline(coordinates, topY);
-  const bottomRule = getNearestBaseline(coordinates, topY + activeHeight);
+  const topRule = topY;
+  const bottomRule = Math.min(coordinates.pageHeight - 1, topY + activeHeight);
 
   ctx.save();
   ctx.strokeStyle = band.borderColor;
@@ -354,7 +357,11 @@ function drawBand(
   for (const element of visibleBandElements(band, pageNumber, totalPages)) {
     const text = bandElementText(element, pageNumber, totalPages);
     const requestedBaseline = topY + BAND_PAD_TOP + element.row * rowHeight + element.fontSize * 0.6;
-    const baselineY = getNearestBaseline(coordinates, requestedBaseline);
+    const snapped = getNearestBaseline(coordinates, requestedBaseline);
+    const baselineY =
+      snapped >= topY + element.fontSize && snapped <= topY + activeHeight - 6
+        ? snapped
+        : Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
     if (element.handwritten) {
       const size = element.fontSize * 1.25;
       const width = measureHandwritten(ctx, text, settings, size);
@@ -503,17 +510,21 @@ export async function renderPages(input: RenderInput): Promise<RenderedPage[]> {
     if (!ctx) throw new Error("Canvas rendering is unavailable");
     const random = makeRng(seed + page.pageNumber * 7919);
     paintPaper(ctx, input.settings, page.coordinates, random);
-    drawBand(ctx, input.settings.header, input.settings, page.coordinates, 0, page.pageNumber, totalPages, random);
-    drawBand(
-      ctx,
-      input.settings.footer,
-      input.settings,
-      page.coordinates,
-      page.coordinates.pageHeight - page.coordinates.footerHeight,
-      page.pageNumber,
-      totalPages,
-      random,
-    );
+    if (input.settings.header.enabled) {
+      drawBand(ctx, input.settings.header, input.settings, page.coordinates, 0, page.pageNumber, totalPages, random);
+    }
+    if (input.settings.footer.enabled) {
+      drawBand(
+        ctx,
+        input.settings.footer,
+        input.settings,
+        page.coordinates,
+        page.coordinates.pageHeight - page.coordinates.footerHeight,
+        page.pageNumber,
+        totalPages,
+        random,
+      );
+    }
 
     const tableBounds: LayoutTableBounds[] = [];
     for (const placement of page.placements) {
