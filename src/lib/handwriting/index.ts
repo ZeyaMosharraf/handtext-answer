@@ -48,6 +48,7 @@ export function getGenerator(id = canvasGenerator.id): HandwritingGenerator {
 }
 
 export * from "./types";
+export * from "./templates";
 export * from "./parse";
 export {
   createPageCoordinateSystem,

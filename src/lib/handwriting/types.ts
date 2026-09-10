@@ -63,11 +63,15 @@ export interface BandConfig {
   elements: PageElement[];
 }
 
+export type RulingType = "ruled" | "plain" | "dotted" | "graph" | "double" | "narrow" | "grid";
+
 export interface RulingConfig {
   enabled: boolean;
+  type?: RulingType;
   color: string;
   opacity: number; // 0 - 1
   thickness: number; // px
+  spacing?: number;
 }
 
 export interface MarginRuleConfig {
@@ -99,6 +103,7 @@ export interface TableStyle {
 }
 
 export interface HandwritingSettings {
+  templateId?: string;
   styleId: string;
   fontFamily: string;
   fontSize: number; // px at render scale
@@ -241,10 +246,10 @@ export const DEFAULT_PAGE: PageConfig = {
   customWidth: 1240,
   customHeight: 1754,
   orientation: "portrait",
-  paperColor: "#fdfcf7",
+  paperColor: "#fbfbf9",
   texture: "low",
-  ruling: { enabled: true, color: "#a7bfe8", opacity: 0.55, thickness: 1 },
-  margin: { enabled: true, color: "#d77a7a", position: 96, thickness: 1.5 },
+  ruling: { enabled: true, type: "ruled", color: "#a7bfe8", opacity: 0.6, thickness: 1 },
+  margin: { enabled: true, color: "#d77a7a", position: 100, thickness: 1.5 },
   headerHeight: 0,
   footerHeight: 0,
 };
@@ -311,6 +316,7 @@ export const DEFAULT_TABLE: TableStyle = {
 };
 
 export const DEFAULT_SETTINGS: HandwritingSettings = {
+  templateId: "assignment",
   styleId: "natural",
   fontFamily: "Kalam",
   fontSize: 30,
@@ -492,279 +498,31 @@ export const FORMAT_PRESETS: FormatPreset[] = [
 
 /* ----------------------------- page templates ----------------------------- */
 
-export interface PageTemplate {
+/* ----------------------------- page templates ----------------------------- */
+
+export interface PageTemplateDefinition {
   id: string;
   name: string;
+  category: "academic" | "notebook" | "exam" | "specialty";
   description: string;
-  build: (s: HandwritingSettings) => HandwritingSettings;
+  badge?: string;
+  paper: PaperKind;
+  page?: Partial<PageConfig>;
+  margins?: {
+    left?: number;
+    top?: number;
+    right?: number;
+    bottom?: number;
+  };
+  header?: Partial<BandConfig>;
+  footer?: Partial<BandConfig>;
+  table?: Partial<TableStyle>;
 }
 
-const band = (b: BandConfig, elements: PageElement[], extra: Partial<BandConfig> = {}): BandConfig => ({
-  ...b,
-  enabled: true,
-  elements,
-  ...extra,
-});
-
-export const PAGE_TEMPLATES: PageTemplate[] = [
-  {
-    id: "plain",
-    name: "Plain Paper",
-    description: "No ruling, no header or footer.",
-    build: (s) => ({
-      ...s,
-      paper: "plain",
-      page: { ...s.page, ruling: { ...s.page.ruling, enabled: false }, margin: { ...s.page.margin, enabled: false } },
-      header: { ...s.header, enabled: false },
-      footer: { ...s.footer, enabled: false },
-    }),
-  },
-  {
-    id: "notebook",
-    name: "Standard Notebook",
-    description: "Blue horizontal lines with a red margin.",
-    build: (s) => ({
-      ...s,
-      paper: "ruled",
-      page: {
-        ...s.page,
-        paperColor: "#fdfcf7",
-        ruling: { enabled: true, color: "#a7bfe8", opacity: 0.6, thickness: 1 },
-        margin: { enabled: true, color: "#d77a7a", position: 96, thickness: 1.5 },
-      },
-      header: { ...s.header, enabled: false },
-      footer: { ...s.footer, enabled: false },
-    }),
-  },
-  {
-    id: "assignment",
-    name: "Ruled Assignment Sheet",
-    description: "Physical assignment sheet with Date & Page box and red margin.",
-    build: (s) => ({
-      ...s,
-      paper: "ruled",
-      page: {
-        ...s.page,
-        paperColor: "#fbfbf9",
-        ruling: { enabled: true, color: "#a7bfe8", opacity: 0.6, thickness: 1 },
-        margin: { enabled: true, color: "#d77a7a", position: 100, thickness: 1.5 },
-      },
-      header: band(
-        s.header,
-        [
-          newElement("date", { slot: "right", row: 0 }),
-          newElement("pageNumber", { slot: "right", row: 1, format: "n" }),
-        ],
-        { enabled: true, height: 140, borderTop: false, borderBottom: true, borderColor: "#a7bfe8" },
-      ),
-      footer: { ...s.footer, enabled: false },
-    }),
-  },
-  {
-    id: "college",
-    name: "College Assignment",
-    description: "Light blue ruling, red margin, header and footer.",
-    build: (s) => ({
-      ...s,
-      paper: "ruled",
-      page: {
-        ...s.page,
-        paperColor: "#ffffff",
-        ruling: { enabled: true, color: "#a7bfe8", opacity: 0.5, thickness: 1 },
-        margin: { enabled: true, color: "#d77a7a", position: 96, thickness: 1.5 },
-      },
-      header: band(s.header, [
-        newElement("studentName", { slot: "left", row: 0 }),
-        newElement("subject", { slot: "right", row: 0 }),
-        newElement("enrollment", { slot: "left", row: 1 }),
-        newElement("pageNumber", { slot: "right", row: 1, format: "page-n-of-t" }),
-      ]),
-      footer: band(s.footer, [
-        newElement("enrollment", { slot: "left", row: 0 }),
-        newElement("signature", { slot: "right", row: 0, applyTo: "last" }),
-      ]),
-    }),
-  },
-  {
-    id: "exam",
-    name: "Exam Answer Sheet",
-    description: "Structured header, ruled writing area, footer with page number.",
-    build: (s) => ({
-      ...s,
-      paper: "exam",
-      page: {
-        ...s.page,
-        paperColor: "#ffffff",
-        ruling: { enabled: true, color: "#9aa0aa", opacity: 0.45, thickness: 1 },
-        margin: { enabled: true, color: "#c0392b", position: 100, thickness: 1.8 },
-      },
-      header: band(
-        s.header,
-        [
-          newElement("text", { slot: "center", row: 0, value: "EXAMINATION ANSWER SHEET", fontSize: 26 }),
-          newElement("studentName", { slot: "left", row: 1 }),
-          newElement("roll", { slot: "right", row: 1 }),
-          newElement("subject", { slot: "left", row: 2 }),
-          newElement("courseCode", { slot: "right", row: 2 }),
-        ],
-        { height: 200 },
-      ),
-      footer: band(s.footer, [
-        newElement("enrollment", { slot: "left", row: 0 }),
-        newElement("pageNumber", { slot: "center", row: 0, format: "page-n-of-t" }),
-        newElement("signature", { slot: "right", row: 0, applyTo: "last" }),
-      ]),
-    }),
-  },
-  {
-    id: "premium",
-    name: "Premium Notebook",
-    description: "Cream paper with subtle grey-blue lines.",
-    build: (s) => ({
-      ...s,
-      paper: "ruled",
-      page: {
-        ...s.page,
-        paperColor: "#fbf3e2",
-        texture: "medium",
-        ruling: { enabled: true, color: "#c0b49a", opacity: 0.6, thickness: 1 },
-        margin: { enabled: true, color: "#9b6b45", position: 100, thickness: 1.4 },
-      },
-      header: { ...s.header, enabled: false },
-      footer: band(s.footer, [newElement("pageNumber", { slot: "center", row: 0, format: "n", handwritten: true })]),
-    }),
-  },
-  {
-    id: "university",
-    name: "University Answer Sheet",
-    description: "Name, enrollment, subject and page in the header; signature in the footer.",
-    build: (s) => ({
-      ...s,
-      paper: "ruled",
-      page: {
-        ...s.page,
-        paperColor: "#ffffff",
-        ruling: { enabled: true, color: "#a7bfe8", opacity: 0.5, thickness: 1 },
-        margin: { enabled: true, color: "#d77a7a", position: 100, thickness: 1.5 },
-      },
-      header: band(
-        s.header,
-        [
-          newElement("studentName", { slot: "left", row: 0 }),
-          newElement("enrollment", { slot: "left", row: 1 }),
-          newElement("subject", { slot: "left", row: 2 }),
-          newElement("pageNumber", { slot: "right", row: 2, format: "page-n" }),
-        ],
-        { height: 210 },
-      ),
-      footer: band(s.footer, [
-        newElement("enrollment", { slot: "left", row: 0 }),
-        newElement("signature", { slot: "right", row: 0 }),
-      ]),
-    }),
-  },
-  {
-    id: "narrow",
-    name: "Narrow Ruled School",
-    description: "Tight double ruling for small, dense handwriting.",
-    build: (s) => ({
-      ...s,
-      paper: "narrow",
-      lineSpacing: 1.32,
-      fontSize: Math.min(s.fontSize, 27),
-      page: {
-        ...s.page,
-        paperColor: "#ffffff",
-        ruling: { enabled: true, color: "#b3c4e2", opacity: 0.6, thickness: 0.9 },
-        margin: { enabled: true, color: "#d77a7a", position: 92, thickness: 1.4 },
-      },
-    }),
-  },
-  {
-    id: "dotted",
-    name: "Dotted Journal",
-    description: "Soft dot grid, no margin line — great for notes.",
-    build: (s) => ({
-      ...s,
-      paper: "dotted",
-      page: {
-        ...s.page,
-        paperColor: "#fdfcf7",
-        texture: "low",
-        ruling: { enabled: true, color: "#b9bec7", opacity: 0.5, thickness: 1.1 },
-        margin: { ...s.page.margin, enabled: false },
-      },
-    }),
-  },
-  {
-    id: "graph",
-    name: "Graph Paper",
-    description: "Fine engineering grid for diagrams and calculations.",
-    build: (s) => ({
-      ...s,
-      paper: "graph",
-      page: {
-        ...s.page,
-        paperColor: "#ffffff",
-        texture: "off",
-        ruling: { enabled: true, color: "#a9c8b4", opacity: 0.45, thickness: 0.7 },
-        margin: { enabled: true, color: "#8fb79c", position: 96, thickness: 1.2 },
-      },
-    }),
-  },
-  {
-    id: "legal",
-    name: "Yellow Legal Pad",
-    description: "Warm yellow sheet with strong blue ruling.",
-    build: (s) => ({
-      ...s,
-      paper: "ruled",
-      page: {
-        ...s.page,
-        paperColor: "#fdf3c4",
-        texture: "low",
-        ruling: { enabled: true, color: "#7f9ed4", opacity: 0.6, thickness: 1 },
-        margin: { enabled: true, color: "#c0392b", position: 110, thickness: 1.6 },
-      },
-    }),
-  },
-  {
-    id: "cornell",
-    name: "Cornell Notes",
-    description: "Cue column on the left and a summary strip at the bottom.",
-    build: (s) => ({
-      ...s,
-      paper: "cornell",
-      marginLeft: 380,
-      page: {
-        ...s.page,
-        paperColor: "#ffffff",
-        ruling: { enabled: true, color: "#c9ced6", opacity: 0.5, thickness: 1 },
-        margin: { enabled: false, color: "#c0392b", position: 340, thickness: 1.6 },
-      },
-    }),
-  },
-  {
-    id: "border",
-    name: "Bordered Project Page",
-    description: "Plain sheet inside a double decorative border.",
-    build: (s) => ({
-      ...s,
-      paper: "border",
-      marginLeft: 130,
-      marginTop: 130,
-      marginRight: 110,
-      marginBottom: 120,
-      page: {
-        ...s.page,
-        paperColor: "#ffffff",
-        texture: "off",
-        ruling: { ...s.page.ruling, enabled: false },
-        margin: { enabled: false, color: "#1d3fb5", position: 96, thickness: 1.6 },
-      },
-    }),
-  },
-];
+export interface PageTemplate extends PageTemplateDefinition {
+  apply: (current: HandwritingSettings) => HandwritingSettings;
+  build: (current: HandwritingSettings) => HandwritingSettings;
+}
 
 export const HAND_FONTS = [
   "Kalam",

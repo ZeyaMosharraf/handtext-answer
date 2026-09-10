@@ -16,6 +16,7 @@ import {
   PAPERS,
   PAPER_COLORS,
   RULING_COLORS,
+  applyTemplate,
   newElement,
   styleSettings,
   type ApplyTo,
@@ -475,19 +476,41 @@ export function DesignPanel({
       {tab === "templates" && (
         <div className="space-y-4">
           <Card className="space-y-3 p-4">
-            <Label>Page templates</Label>
+            <Label>Physical Paper Templates</Label>
             <div className="grid gap-2">
-              {PAGE_TEMPLATES.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => onChange(t.build(settings))}
-                  className="rounded-lg border border-border bg-card p-3 text-left hover:bg-muted"
-                >
-                  <span className="block text-sm font-semibold">{t.name}</span>
-                  <span className="block text-xs text-muted-foreground">{t.description}</span>
-                </button>
-              ))}
+              {PAGE_TEMPLATES.map((t) => {
+                const isSelected = (settings.templateId ?? "assignment") === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => onChange(applyTemplate(t.id, settings))}
+                    className={cn(
+                      "rounded-lg border p-3 text-left transition-colors",
+                      isSelected
+                        ? "border-primary bg-primary/10 shadow-sm"
+                        : "border-border bg-card hover:bg-muted",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold">{t.name}</span>
+                      {t.badge && (
+                        <span
+                          className={cn(
+                            "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                            isSelected
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {t.badge}
+                        </span>
+                      )}
+                    </div>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">{t.description}</span>
+                  </button>
+                );
+              })}
             </div>
           </Card>
 

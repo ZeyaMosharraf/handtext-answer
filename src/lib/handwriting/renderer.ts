@@ -13,7 +13,7 @@ import {
   type LayoutTableBounds,
   type PageCoordinateSystem,
 } from "./layout";
-import { formatPageNumber, inkHex, type BandConfig, type HandwritingSettings } from "./types";
+import { formatPageNumber, inkHex, type BandConfig, type HandwritingSettings, type RulingType } from "./types";
 
 function makeRng(seed: number) {
   let state = seed >>> 0 || 1;
@@ -223,29 +223,40 @@ function paintPaper(
   }
 
   const ruling = settings.page.ruling;
-  if (ruling.enabled && settings.paper !== "plain") {
+  const rulingType: RulingType =
+    ruling.type ??
+    (settings.paper === "plain"
+      ? "plain"
+      : settings.paper === "dotted"
+      ? "dotted"
+      : settings.paper === "graph" || settings.paper === "grid"
+      ? "graph"
+      : "ruled");
+
+  if (ruling.enabled && rulingType !== "plain") {
     ctx.strokeStyle = withAlpha(ruling.color, ruling.opacity);
     ctx.lineWidth = ruling.thickness;
-    if (settings.paper === "grid" || settings.paper === "graph") {
-      const step = settings.paper === "graph" ? rulingSpacing / 4 : rulingSpacing / 2;
-      for (let x = step; x < pageWidth; x += step) {
+    const step = ruling.spacing && ruling.spacing > 0 ? ruling.spacing : rulingSpacing;
+    if (rulingType === "graph" || settings.paper === "grid" || settings.paper === "graph") {
+      const gStep = settings.paper === "graph" ? step / 4 : step / 2;
+      for (let x = gStep; x < pageWidth; x += gStep) {
         ctx.beginPath();
         ctx.moveTo(x, paperTop);
         ctx.lineTo(x, paperBottom);
         ctx.stroke();
       }
-      for (let y = firstBaselineY; y <= contentBottom; y += step) {
+      for (let y = firstBaselineY; y <= contentBottom; y += gStep) {
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(pageWidth, y);
         ctx.stroke();
       }
-    } else if (settings.paper === "dotted") {
-      const step = rulingSpacing / 2;
+    } else if (rulingType === "dotted") {
+      const dStep = step / 2;
       ctx.save();
       ctx.fillStyle = withAlpha(ruling.color, Math.min(1, ruling.opacity + 0.15));
-      for (let y = firstBaselineY; y <= contentBottom; y += step) {
-        for (let x = step; x < pageWidth; x += step) {
+      for (let y = firstBaselineY; y <= contentBottom; y += dStep) {
+        for (let x = dStep; x < pageWidth; x += dStep) {
           ctx.beginPath();
           ctx.arc(x, y, Math.max(0.9, ruling.thickness), 0, Math.PI * 2);
           ctx.fill();
@@ -260,7 +271,7 @@ function paintPaper(
       const right = settings.paper === "exam" ? pageWidth : pageWidth - 36;
       const lastRuledY = footerHeight > 0 ? pageHeight - footerHeight - 1 : contentBottom;
 
-      for (let y = firstBaselineY; y <= lastRuledY; y += rulingSpacing) {
+      for (let y = firstBaselineY; y <= lastRuledY; y += step) {
         ctx.beginPath();
         ctx.moveTo(left, y);
         ctx.lineTo(right, y);
@@ -269,8 +280,8 @@ function paintPaper(
           ctx.save();
           ctx.globalAlpha = 0.4;
           ctx.beginPath();
-          ctx.moveTo(left, y - rulingSpacing * 0.32);
-          ctx.lineTo(right, y - rulingSpacing * 0.32);
+          ctx.moveTo(left, y - step * 0.32);
+          ctx.lineTo(right, y - step * 0.32);
           ctx.stroke();
           ctx.restore();
         }
@@ -368,18 +379,22 @@ function drawBand(
       const boxHeight = rowCount * boxRowHeight;
       const boxTop = Math.max(12, Math.floor((activeHeight - boxHeight) / 2));
 
-      ctx.save();
-      ctx.strokeStyle = band.borderColor || withAlpha(settings.page.ruling.color, 0.75);
-      ctx.lineWidth = 1;
-      ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
-      for (let i = 1; i < rowCount; i++) {
-        const lineY = boxTop + i * boxRowHeight;
-        ctx.beginPath();
-        ctx.moveTo(boxLeft, lineY);
-        ctx.lineTo(boxRight, lineY);
-        ctx.stroke();
+      const showBox = settings.templateId !== "notebook" && (rightElements.length > 1 || band.borderBottom);
+
+      if (showBox) {
+        ctx.save();
+        ctx.strokeStyle = band.borderColor || withAlpha(settings.page.ruling.color, 0.75);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
+        for (let i = 1; i < rowCount; i++) {
+          const lineY = boxTop + i * boxRowHeight;
+          ctx.beginPath();
+          ctx.moveTo(boxLeft, lineY);
+          ctx.lineTo(boxRight, lineY);
+          ctx.stroke();
+        }
+        ctx.restore();
       }
-      ctx.restore();
 
       rightElements.forEach((element, index) => {
         const rowY = boxTop + index * boxRowHeight;
