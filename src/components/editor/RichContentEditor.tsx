@@ -28,18 +28,39 @@ interface RichContentEditorProps {
 }
 
 function checkBlackInkActive(): boolean {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined" || typeof document === "undefined") return false;
+  try {
+    const cmdVal = document.queryCommandValue("foreColor")?.toLowerCase();
+    if (
+      cmdVal === "rgb(20, 24, 33)" ||
+      cmdVal === "rgb(20,24,33)" ||
+      cmdVal === "#141821" ||
+      cmdVal === "141821"
+    ) {
+      return true;
+    }
+  } catch {
+    // Ignore queryCommandValue exceptions
+  }
+
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return false;
   let node: Node | null = sel.anchorNode;
   while (node && node !== document.body) {
     if (node.nodeType === 1 /* Element */) {
       const el = node as HTMLElement;
+      const colorAttr = el.getAttribute("color")?.toLowerCase();
+      const styleColor = el.style?.color?.toLowerCase();
+      const dataColor = el.getAttribute("data-color")?.toLowerCase();
       if (
-        el.getAttribute("data-color") === HIGHLIGHT_COLOR ||
-        el.style.color === "rgb(20, 24, 33)" ||
-        el.style.color === "#141821" ||
-        el.tagName === "MARK"
+        colorAttr === HIGHLIGHT_COLOR.toLowerCase() ||
+        colorAttr === "#141821" ||
+        colorAttr?.includes("141821") ||
+        styleColor === "rgb(20, 24, 33)" ||
+        styleColor === "#141821" ||
+        dataColor === HIGHLIGHT_COLOR.toLowerCase() ||
+        el.tagName === "MARK" ||
+        (el.tagName === "FONT" && (colorAttr?.includes("141821") || colorAttr === "#141821"))
       ) {
         return true;
       }
@@ -138,6 +159,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       el.focus();
       const active = checkBlackInkActive();
       if (active) {
+        document.execCommand("removeFormat", false);
         document.execCommand("foreColor", false, "inherit");
       } else {
         document.execCommand("foreColor", false, HIGHLIGHT_COLOR);

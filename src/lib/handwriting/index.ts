@@ -54,9 +54,14 @@ export {
   createPageCoordinateSystem,
   ensureFontsReady,
   getBaseline,
+  getLineIndexAtPageY,
   getNearestBaseline,
   layoutDocument,
+  lineCapacity,
+  pageToScreen,
   renderPages,
+  renderPageToCanvas,
+  screenToPage,
   writingArea,
 } from "./renderer";
 export type { LayoutDocument, LayoutPage, LayoutPlacement, PageCoordinateSystem } from "./renderer";

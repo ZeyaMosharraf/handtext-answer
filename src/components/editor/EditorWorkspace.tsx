@@ -24,14 +24,21 @@ import { ResultView } from "@/components/editor/ResultView";
 import { RichContentEditor, type FormatState, type RichContentEditorHandle } from "@/components/editor/RichContentEditor";
 import { Button, Card, Input, Spinner, Textarea } from "@/components/ui/primitives";
 import {
+  createPageCoordinateSystem,
+  getBaseline,
   getGenerator,
+  getLineIndexAtPageY,
+  pageToScreen,
   renderPages,
+  renderPageToCanvas,
+  screenToPage,
   wordCount,
   writingArea,
   type GeneratedPage,
   type HandwritingSettings,
+  type PageCoordinateSystem,
 } from "@/lib/handwriting";
-import { migrateLegacyContentToHtml } from "@/lib/handwriting/parse";
+import { htmlToPlainText, migrateLegacyContentToHtml, plainTextToHtml } from "@/lib/handwriting/parse";
 import { recordUsage, updateProject, type Project } from "@/lib/projects";
 import { loadTemplates, persistTemplates, type SavedTemplate } from "@/lib/templates";
 import { cn } from "@/lib/utils";
@@ -137,7 +144,11 @@ export function EditorWorkspace({ project }: { project: Project }) {
   };
 
   /* ---------------------------------- state --------------------------------- */
-  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const activeCoordinatesRef = useRef<PageCoordinateSystem | null>(null);
+  const renderRafRef = useRef<number | null>(null);
+  const renderTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [renderedInitial, setRenderedInitial] = useState(false);
   const [previewPages, setPreviewPages] = useState(0);
   const [previewing, setPreviewing] = useState(false);
 
@@ -157,6 +168,12 @@ export function EditorWorkspace({ project }: { project: Project }) {
   const pageBoxRef = useRef<HTMLDivElement>(null);
   const onPageRef = useRef<HTMLTextAreaElement>(null);
   const [pageScale, setPageScale] = useState(0);
+  const [pointerGuide, setPointerGuide] = useState<{
+    visible: boolean;
+    screenX: number;
+    screenY: number;
+    lineIndex: number;
+  } | null>(null);
 
   useLayoutEffect(() => {
     const el = pageBoxRef.current;
@@ -193,28 +210,51 @@ export function EditorWorkspace({ project }: { project: Project }) {
     [content, question, assignmentMode, settings],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    setPreviewing(true);
-    const timer = setTimeout(() => {
-      renderPages({
+  const executeRender = useCallback(() => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas) return;
+    renderPageToCanvas(
+      {
         content: previewInput.content,
         ...(previewInput.question ? { question: previewInput.question } : {}),
         settings: previewInput.settings,
+      },
+      canvas,
+      0,
+    )
+      .then((res) => {
+        setPreviewPages(res.totalPages);
+        activeCoordinatesRef.current = res.coordinates;
+        setRenderedInitial(true);
       })
-        .then((rendered) => {
-          if (cancelled) return;
-          setPreviewPages(rendered.length);
-          if (rendered[0]) setPreviewSrc(rendered[0].canvas.toDataURL("image/png"));
-        })
-        .catch(() => undefined)
-        .finally(() => !cancelled && setPreviewing(false));
-    }, 450);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
+      .catch(() => undefined)
+      .finally(() => setPreviewing(false));
   }, [previewInput]);
+
+  const scheduleRender = useCallback(
+    (immediate = false) => {
+      if (renderRafRef.current) cancelAnimationFrame(renderRafRef.current);
+      if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current);
+
+      if (immediate) {
+        renderRafRef.current = requestAnimationFrame(executeRender);
+      } else {
+        setPreviewing(true);
+        renderTimeoutRef.current = setTimeout(() => {
+          renderRafRef.current = requestAnimationFrame(executeRender);
+        }, 120);
+      }
+    },
+    [executeRender],
+  );
+
+  useEffect(() => {
+    scheduleRender(writeOnPage);
+    return () => {
+      if (renderRafRef.current) cancelAnimationFrame(renderRafRef.current);
+      if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current);
+    };
+  }, [scheduleRender, writeOnPage]);
 
   /* --------------------------------- actions -------------------------------- */
   const insertTable = () => {
@@ -469,14 +509,32 @@ export function EditorWorkspace({ project }: { project: Project }) {
             </div>
           </div>
           <Card className="overflow-hidden p-2 lg:sticky lg:top-24">
-            <div ref={pageBoxRef} className="relative">
-              {previewSrc ? (
-                <img
-                  src={previewSrc}
-                  alt="Live handwritten preview of page 1"
-                  className={cn("block w-full rounded transition-opacity", previewing && "opacity-60")}
-                />
-              ) : (
+            <div
+              ref={pageBoxRef}
+              onPointerMove={(e) => {
+                if (!writeOnPage || !pageBoxRef.current) return;
+                const rect = pageBoxRef.current.getBoundingClientRect();
+                const screenX = e.clientX - rect.left;
+                const screenY = e.clientY - rect.top;
+                const coords = activeCoordinatesRef.current ?? createPageCoordinateSystem(settings);
+                const { pageX, pageY } = screenToPage(screenX, screenY, rect, coords);
+                const lineIndex = getLineIndexAtPageY(coords, pageY);
+                const baselineY = getBaseline(coords, lineIndex);
+                const { screenX: guideX, screenY: guideY } = pageToScreen(pageX, baselineY, rect, coords);
+                setPointerGuide({ visible: true, screenX: guideX, screenY: guideY, lineIndex });
+              }}
+              onPointerLeave={() => setPointerGuide(null)}
+              onClick={() => {
+                if (writeOnPage) onPageRef.current?.focus();
+              }}
+              className="relative select-none"
+            >
+              <canvas
+                ref={previewCanvasRef}
+                className={cn("block w-full rounded transition-opacity", previewing && "opacity-90")}
+                style={{ display: renderedInitial ? "block" : "none" }}
+              />
+              {!renderedInitial && (
                 <div className="aspect-[1240/1754] w-full animate-pulse rounded bg-muted" aria-hidden />
               )}
 
@@ -485,24 +543,51 @@ export function EditorWorkspace({ project }: { project: Project }) {
                   const area = writingArea(settings);
                   const px = pageScale / area.pageWidth;
                   return (
-                    <textarea
-                      ref={onPageRef}
-                      value={content.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ")}
-                      onChange={(e) => commit((p) => ({ ...p, content: e.target.value }))}
-                      aria-label="Write directly on the page"
-                      spellCheck={false}
-                      autoFocus
-                      className="absolute resize-none border-0 bg-transparent p-0 text-transparent caret-primary outline-none selection:bg-primary/20"
-                      style={{
-                        left: `${area.left * 100}%`,
-                        top: `${area.top * 100}%`,
-                        width: `${area.width * 100}%`,
-                        height: `${area.height * 100}%`,
-                        fontFamily: `"${settings.fontFamily}", cursive`,
-                        fontSize: `${area.fontSize * px}px`,
-                        lineHeight: `${area.lineHeight * px}px`,
-                      }}
-                    />
+                    <>
+                      <textarea
+                        ref={onPageRef}
+                        value={htmlToPlainText(content)}
+                        onChange={(e) => {
+                          const nextHtml = plainTextToHtml(e.target.value);
+                          commit((p) => ({ ...p, content: nextHtml }));
+                          scheduleRender(true);
+                        }}
+                        aria-label="Write directly on the page"
+                        spellCheck={false}
+                        autoFocus
+                        className="absolute resize-none border-0 bg-transparent p-0 text-transparent caret-primary outline-none selection:bg-primary/20"
+                        style={{
+                          left: `${area.left * 100}%`,
+                          top: `${area.top * 100}%`,
+                          width: `${area.width * 100}%`,
+                          height: `${area.height * 100}%`,
+                          fontFamily: `"${settings.fontFamily}", cursive`,
+                          fontSize: `${area.fontSize * px}px`,
+                          lineHeight: `${area.lineHeight * px}px`,
+                        }}
+                      />
+                      {pointerGuide && pointerGuide.visible && (
+                        <div
+                          className="pointer-events-none absolute z-10"
+                          style={{
+                            left: `${area.left * 100}%`,
+                            top: `${pointerGuide.screenY}px`,
+                            width: `${area.width * 100}%`,
+                          }}
+                        >
+                          <div className="relative flex items-center">
+                            <div className="h-[1.5px] w-full bg-primary/30" />
+                            <div
+                              className="absolute -top-3.5 flex items-center gap-1 rounded bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground shadow"
+                              style={{ left: `${Math.max(0, pointerGuide.screenX - 16)}px` }}
+                            >
+                              <PenLine className="size-2.5" />
+                              <span>Line {pointerGuide.lineIndex + 1}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </>
                   );
                 })()}
             </div>

@@ -1,4 +1,4 @@
-import { type Seg } from "./parse";
+import { HIGHLIGHT_COLOR, type Seg } from "./parse";
 import {
   BAND_PAD_TOP,
   BAND_ROW_HEIGHT,
@@ -115,6 +115,14 @@ function writeSegments(
     if (!segment.text) continue;
     const segmentStart = x;
     const color = segment.color ?? pen.color;
+    const isBlackInk = Boolean(
+      segment.color &&
+        (segment.color === HIGHLIGHT_COLOR ||
+          segment.color.toLowerCase() === "#141821" ||
+          segment.color.includes("141821") ||
+          segment.color.includes("20, 24, 33") ||
+          segment.color.includes("20,24,33")),
+    );
     for (const character of segment.text) {
       if (character === " ") {
         x +=
@@ -135,7 +143,7 @@ function writeSegments(
       ctx.save();
       ctx.font = `${segment.italic ? "italic " : ""}${size}px "${settings.fontFamily}", cursive`;
       ctx.fillStyle = color;
-      ctx.globalAlpha = Math.min(1, (segment.bold ? 1 : settings.inkIntensity) + (random() - 0.5) * 0.22 * settings.inkVariation);
+      ctx.globalAlpha = Math.min(1, (segment.bold || isBlackInk ? 1 : settings.inkIntensity) + (random() - 0.5) * 0.22 * settings.inkVariation);
       ctx.translate(x, baselineY + characterBaselineJitter);
       ctx.rotate(rotation);
       ctx.transform(horizontal, 0, -Math.tan(slant), 1, 0, 0);
@@ -143,6 +151,7 @@ function writeSegments(
         (settings.penWidth - 1) * 0.7 +
         pressure * 0.9 +
         (segment.bold ? 1.1 : 0) +
+        (isBlackInk ? 0.35 : 0) +
         (random() - 0.5) * 0.3 * settings.inkVariation;
       if (stroke > 0.12) {
         ctx.lineWidth = stroke;
@@ -587,20 +596,100 @@ function drawDebug(
 
 /** Writing area of a page as fractions of the page, for the direct-writing overlay. */
 export function writingArea(settings: HandwritingSettings) {
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas rendering is unavailable");
-  const coordinates = createPageCoordinateSystem(settings, ctx);
+  const coordinates = createPageCoordinateSystem(settings);
+  const line0Top = coordinates.firstBaselineY - coordinates.rulingSpacing;
   return {
     pageWidth: coordinates.pageWidth,
     pageHeight: coordinates.pageHeight,
     left: coordinates.contentLeft / coordinates.pageWidth,
-    top: coordinates.contentTop / coordinates.pageHeight,
+    top: line0Top / coordinates.pageHeight,
     width: (coordinates.contentRight - coordinates.contentLeft) / coordinates.pageWidth,
-    height: (coordinates.contentBottom - coordinates.contentTop) / coordinates.pageHeight,
+    height: (coordinates.contentBottom - line0Top) / coordinates.pageHeight,
     lineHeight: coordinates.rulingSpacing,
     fontSize: settings.fontSize,
+    firstBaselineY: coordinates.firstBaselineY,
+    rulingSpacing: coordinates.rulingSpacing,
+    contentLeft: coordinates.contentLeft,
+    contentRight: coordinates.contentRight,
+    coordinates,
   };
+}
+
+/**
+ * Renders a single page directly into an existing canvas element for immediate interactive display.
+ * Avoids toDataURL and image decoding overhead to achieve instantaneous 60fps responsiveness.
+ */
+export async function renderPageToCanvas(
+  input: RenderInput,
+  targetCanvas: HTMLCanvasElement,
+  pageIndex = 0,
+): Promise<{ totalPages: number; coordinates: PageCoordinateSystem }> {
+  await ensureFontsReady([input.settings.fontFamily]);
+  const measurer = document.createElement("canvas").getContext("2d");
+  if (!measurer) throw new Error("Canvas rendering is unavailable");
+  const documentLayout = layoutDocument(measurer, input);
+  const totalPages = documentLayout.pages.length;
+  const page = documentLayout.pages[pageIndex] ?? documentLayout.pages[0];
+  if (!page) throw new Error("No page available to render");
+
+  if (targetCanvas.width !== page.coordinates.pageWidth || targetCanvas.height !== page.coordinates.pageHeight) {
+    targetCanvas.width = page.coordinates.pageWidth;
+    targetCanvas.height = page.coordinates.pageHeight;
+  }
+
+  const ctx = targetCanvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas context is unavailable");
+
+  const ink = inkHex(input.settings);
+  const seed = hashString(`${input.content}|${input.question ?? ""}|${input.settings.styleId}|${input.settings.fontFamily}`);
+  const random = makeRng(seed + page.pageNumber * 7919);
+
+  paintPaper(ctx, input.settings, page.coordinates, random);
+  if (input.settings.header.enabled) {
+    drawBand(ctx, input.settings.header, input.settings, page.coordinates, 0, page.pageNumber, totalPages, random);
+  }
+  if (input.settings.footer.enabled) {
+    drawBand(
+      ctx,
+      input.settings.footer,
+      input.settings,
+      page.coordinates,
+      page.coordinates.pageHeight - page.coordinates.footerHeight,
+      page.pageNumber,
+      totalPages,
+      random,
+    );
+  }
+
+  const tableBounds: LayoutTableBounds[] = [];
+  for (const placement of page.placements) {
+    if (placement.type === "tableRow") {
+      tableBounds.push(drawTableRow(ctx, placement, input.settings, page.coordinates, random, ink));
+      continue;
+    }
+    const segments = placement.marker
+      ? [...plainSegments(`${placement.marker} `), ...placement.segs]
+      : placement.segs;
+    if (!segments.some((segment) => segment.text.trim())) continue;
+    writeSegments(
+      ctx,
+      segments,
+      input.settings,
+      page.coordinates.contentLeft + placement.indent,
+      getBaseline(page.coordinates, placement.lineIndex),
+      random,
+      {
+        size: input.settings.fontSize * placement.scale,
+        color: ink,
+        scale: placement.scale,
+        underline: placement.underline,
+      },
+    );
+  }
+
+  if (import.meta.env.DEV && input.debugLayout === true) drawDebug(ctx, page.coordinates, tableBounds);
+
+  return { totalPages, coordinates: page.coordinates };
 }
 
 export interface RenderedPage {
@@ -678,5 +767,14 @@ export async function renderPages(input: RenderInput): Promise<RenderedPage[]> {
   });
 }
 
-export { createPageCoordinateSystem, getBaseline, getNearestBaseline, layoutDocument } from "./layout";
+export {
+  createPageCoordinateSystem,
+  getBaseline,
+  getLineIndexAtPageY,
+  getNearestBaseline,
+  layoutDocument,
+  lineCapacity,
+  pageToScreen,
+  screenToPage,
+} from "./layout";
 export type { LayoutDocument, LayoutPage, LayoutPlacement, PageCoordinateSystem } from "./layout";

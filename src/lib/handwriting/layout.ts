@@ -227,9 +227,9 @@ function wrapWords(
 
 function activeCoordinateSystem(
   settings: HandwritingSettings,
-  ctx: CanvasRenderingContext2D,
-  pageNumber: number,
-  totalPages: number,
+  ctx?: CanvasRenderingContext2D,
+  pageNumber = 1,
+  totalPages = 1,
 ): PageCoordinateSystem {
   const { w, h } = pageDimensions(settings.page);
   const rulingSpacing = settings.fontSize * settings.lineSpacing;
@@ -283,9 +283,53 @@ export function getNearestBaseline(coordinates: PageCoordinateSystem, y: number)
   return getBaseline(coordinates, lineIndex);
 }
 
-function lineCapacity(coordinates: PageCoordinateSystem) {
+export function lineCapacity(coordinates: PageCoordinateSystem) {
   if (coordinates.contentBottom < coordinates.firstBaselineY) return 0;
   return Math.floor((coordinates.contentBottom - coordinates.firstBaselineY) / coordinates.rulingSpacing) + 1;
+}
+
+/** Converts screen pixel coordinates to physical page coordinates. */
+export function screenToPage(
+  screenX: number,
+  screenY: number,
+  containerRect: { width: number; height: number; left?: number; top?: number },
+  coordinates: PageCoordinateSystem,
+): { pageX: number; pageY: number } {
+  const scale = containerRect.width / coordinates.pageWidth;
+  const pageX = scale > 0 ? screenX / scale : screenX;
+  const pageY = scale > 0 ? screenY / scale : screenY;
+  return {
+    pageX: Math.max(0, Math.min(coordinates.pageWidth, pageX)),
+    pageY: Math.max(0, Math.min(coordinates.pageHeight, pageY)),
+  };
+}
+
+/** Converts physical page coordinates to screen pixel coordinates within the preview container. */
+export function pageToScreen(
+  pageX: number,
+  pageY: number,
+  containerRect: { width: number; height: number },
+  coordinates: PageCoordinateSystem,
+): { screenX: number; screenY: number } {
+  const scale = containerRect.width / coordinates.pageWidth;
+  return {
+    screenX: pageX * scale,
+    screenY: pageY * scale,
+  };
+}
+
+/**
+ * Maps any page Y coordinate to the corresponding ruled line index (0, 1, 2, ...).
+ * Line interval i spans from (firstBaselineY + (i - 1) * rulingSpacing) to (firstBaselineY + i * rulingSpacing).
+ * The baseline of line i sits at (firstBaselineY + i * rulingSpacing).
+ */
+export function getLineIndexAtPageY(coordinates: PageCoordinateSystem, pageY: number): number {
+  const capacity = lineCapacity(coordinates);
+  if (capacity <= 0) return 0;
+  const line0Top = coordinates.firstBaselineY - coordinates.rulingSpacing;
+  const offsetFromTop = pageY - line0Top;
+  const rawIndex = Math.floor(offsetFromTop / coordinates.rulingSpacing);
+  return Math.max(0, Math.min(capacity - 1, rawIndex));
 }
 
 function blockLines(
@@ -487,7 +531,7 @@ export function layoutDocument(
 
 export function createPageCoordinateSystem(
   settings: HandwritingSettings,
-  ctx: CanvasRenderingContext2D,
+  ctx?: CanvasRenderingContext2D,
   pageNumber = 1,
   totalPages = 1,
 ) {

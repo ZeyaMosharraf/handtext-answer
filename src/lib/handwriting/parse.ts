@@ -161,7 +161,7 @@ export function parseInlineHtml(innerHtml: string): Seg[] {
       if (tag === "STRONG" || tag === "B") boldCount = Math.max(0, boldCount - 1);
       else if (tag === "EM" || tag === "I") italicCount = Math.max(0, italicCount - 1);
       else if (tag === "U") underlineCount = Math.max(0, underlineCount - 1);
-      else if (tag === "MARK" || tag === "SPAN") currentColor = undefined;
+      else if (tag === "MARK" || tag === "SPAN" || tag === "FONT") currentColor = undefined;
     } else {
       if (tag === "STRONG" || tag === "B") boldCount++;
       else if (tag === "EM" || tag === "I") italicCount++;
@@ -169,11 +169,13 @@ export function parseInlineHtml(innerHtml: string): Seg[] {
       else if (tag === "MARK") {
         currentColor = HIGHLIGHT_COLOR;
         boldCount++;
-      } else if (tag === "SPAN") {
+      } else if (tag === "SPAN" || tag === "FONT") {
         if (
           attrs.includes(HIGHLIGHT_COLOR) ||
           attrs.includes("141821") ||
-          attrs.includes("rgb(20, 24, 33)")
+          attrs.includes("rgb(20, 24, 33)") ||
+          attrs.includes("rgb(20,24,33)") ||
+          (tag === "FONT" && attrs.includes("color"))
         ) {
           currentColor = HIGHLIGHT_COLOR;
         }
@@ -557,4 +559,36 @@ export function tableToMarkdown(table: TableData): string {
     if (index === 0 && table.headerRow) out.push(`|${row.map(() => "---").join("|")}|`);
   });
   return out.join("\n");
+}
+
+/** Converts HTML content to plain text with preserved line breaks for on-page text editing. */
+export function htmlToPlainText(html: string): string {
+  if (!html) return "";
+  if (!isHtmlContent(html)) return html;
+  const withLineBreaks = html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr|blockquote)>/gi, "\n")
+    .replace(/<hr\s*\/?>/gi, "\n---\n");
+  const stripped = withLineBreaks.replace(/<[^>]+>/g, "");
+  return unescapeHtml(stripped).replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
+/** Converts plain text input from on-page writing into clean paragraph HTML. */
+export function plainTextToHtml(plain: string): string {
+  if (!plain) return "<p><br></p>";
+  const lines = plain.split("\n");
+  const paragraphs: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      paragraphs.push("<p><br></p>");
+    } else {
+      const escaped = trimmed
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      paragraphs.push(`<p>${escaped}</p>`);
+    }
+  }
+  return paragraphs.join("");
 }
