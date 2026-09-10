@@ -44,6 +44,7 @@ function Dashboard() {
   const { data: projects, isLoading, isError } = useQuery({
     queryKey: ["projects"],
     queryFn: listProjects,
+    enabled: !!user,
   });
 
   const create = useMutation({
