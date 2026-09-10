@@ -87,7 +87,7 @@ function AuthPage() {
     setBusy(true);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}${next || "/dashboard"}` },
+      options: { redirectTo: `${window.location.origin}/auth?next=${encodeURIComponent(next || "/dashboard")}` },
     });
     if (error) {
       setBusy(false);
