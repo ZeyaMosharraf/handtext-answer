@@ -9,6 +9,7 @@ import {
   Loader2,
   PenLine,
   Redo2,
+  Save,
   Sparkles,
   Table2,
   Underline,
@@ -39,9 +40,17 @@ import {
   type PageCoordinateSystem,
 } from "@/lib/handwriting";
 import { htmlToPlainText, migrateLegacyContentToHtml, plainTextToHtml } from "@/lib/handwriting/parse";
-import { recordUsage, updateProject, type Project } from "@/lib/projects";
+import {
+  isProjectSnapshotEqual,
+  recordUsage,
+  updateProject,
+  type Project,
+  type ProjectSnapshot,
+} from "@/lib/projects";
 import { loadTemplates, persistTemplates, type SavedTemplate } from "@/lib/templates";
 import { cn } from "@/lib/utils";
+
+const AUTOSAVE_DELAY_MS = 3500;
 
 type Tab = "content" | "preview" | "design";
 
@@ -124,16 +133,140 @@ export function EditorWorkspace({ project }: { project: Project }) {
     });
   }, []);
 
+  /* ---------------------- client-side persistence & dirty tracking ----------- */
+  const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
+
+  const initialSnapshot = useMemo<ProjectSnapshot>(
+    () => ({
+      name: project.name,
+      question: project.question,
+      content: migrateLegacyContentToHtml(project.content),
+      settings: project.settings,
+      assignmentMode: Boolean(project.question),
+    }),
+    [project],
+  );
+
+  const lastSavedSnapshotRef = useRef<ProjectSnapshot>(initialSnapshot);
+  const currentDraftRef = useRef<ProjectSnapshot>(initialSnapshot);
+
+  // Keep currentDraftRef updated with latest values for async access
+  currentDraftRef.current = {
+    name,
+    question,
+    content,
+    settings,
+    assignmentMode,
+  };
+
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSavingRef = useRef(false);
+  const pendingSaveRef = useRef(false);
+  const isMountedRef = useRef(false);
+
+  const isDirty = useCallback((): boolean => {
+    return !isProjectSnapshotEqual(currentDraftRef.current, lastSavedSnapshotRef.current);
+  }, []);
+
+  const performSave = useCallback(async (): Promise<boolean> => {
+    // 1. Cancel pending debounce timer
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+
+    // 2. If nothing changed, do not touch database
+    if (!isDirty()) {
+      if (saveState !== "saved") setSaveState("saved");
+      return true;
+    }
+
+    // 3. Prevent concurrent writes
+    if (isSavingRef.current) {
+      pendingSaveRef.current = true;
+      return false;
+    }
+
+    isSavingRef.current = true;
+    setSaveState("saving");
+
+    const snapshotToPersist = { ...currentDraftRef.current };
+
+    try {
+      await updateProject(project.id, {
+        name: snapshotToPersist.name.trim() || "Untitled answer",
+        question: snapshotToPersist.assignmentMode ? snapshotToPersist.question : "",
+        content: snapshotToPersist.content,
+        settings: snapshotToPersist.settings,
+      });
+
+      lastSavedSnapshotRef.current = snapshotToPersist;
+      setSaveState("saved");
+      return true;
+    } catch (error) {
+      console.error("Failed to save project:", error);
+      setSaveState("error");
+      return false;
+    } finally {
+      isSavingRef.current = false;
+
+      // If changes were made while save was in-flight, trigger follow-up debounced save
+      if (pendingSaveRef.current || isDirty()) {
+        pendingSaveRef.current = false;
+        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = setTimeout(() => {
+          void performSave();
+        }, AUTOSAVE_DELAY_MS);
+      }
+    }
+  }, [isDirty, project.id, saveState]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
-      e.preventDefault();
-      if (e.shiftKey) redo();
-      else undo();
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (key === "s") {
+        e.preventDefault();
+        void performSave();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo]);
+  }, [undo, redo, performSave]);
+
+  // Safeguard against tab closure with unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty()) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
+  // Flush dirty changes on unmount so navigation doesn't lose edits
+  useEffect(() => {
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
+      if (isDirty()) {
+        const snap = currentDraftRef.current;
+        void updateProject(project.id, {
+          name: snap.name.trim() || "Untitled answer",
+          question: snap.assignmentMode ? snap.question : "",
+          content: snap.content,
+          settings: snap.settings,
+        }).catch(() => undefined);
+      }
+    };
+  }, [isDirty, project.id]);
 
   /* -------------------------------- templates ------------------------------- */
   const [templates, setTemplates] = useState<SavedTemplate[]>([]);
@@ -156,9 +289,6 @@ export function EditorWorkspace({ project }: { project: Project }) {
   const [stage, setStage] = useState("");
   const [progress, setProgress] = useState(0);
   const [pages, setPages] = useState<GeneratedPage[] | null>(null);
-
-  const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
-  const firstRun = useRef(true);
 
   const [tableRows, setTableRows] = useState(4);
   const [tableCols, setTableCols] = useState(3);
@@ -184,25 +314,35 @@ export function EditorWorkspace({ project }: { project: Project }) {
     return () => observer.disconnect();
   }, [writeOnPage]);
 
-  /* --------------------------------- autosave -------------------------------- */
+  /* --------------------------------- debounced autosave ---------------------- */
   useEffect(() => {
-    if (firstRun.current) {
-      firstRun.current = false;
+    if (!isMountedRef.current) {
+      isMountedRef.current = true;
       return;
     }
-    setSaveState("saving");
-    const timer = setTimeout(() => {
-      updateProject(project.id, {
-        name: name.trim() || "Untitled answer",
-        question: assignmentMode ? question : "",
-        content,
-        settings,
-      })
-        .then(() => setSaveState("saved"))
-        .catch(() => setSaveState("error"));
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [name, question, content, settings, assignmentMode, project.id]);
+
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+
+    // If draft is currently clean, do not start any timer
+    if (!isDirty()) {
+      return;
+    }
+
+    // Debounce: do NOT call setSaveState("saving") until save begins
+    autosaveTimerRef.current = setTimeout(() => {
+      void performSave();
+    }, AUTOSAVE_DELAY_MS);
+
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+  }, [name, question, content, settings, assignmentMode, isDirty, performSave]);
 
   /* -------------------------------- live preview ------------------------------ */
   const previewInput = useMemo(
@@ -272,6 +412,25 @@ export function EditorWorkspace({ project }: { project: Project }) {
       toast.error("That answer is very long. Try splitting it into two projects.");
       return;
     }
+
+    // Cancel pending autosave timer to prevent race conditions
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+
+    // Persist latest draft first if dirty so generation operates on confirmed saved state
+    if (isDirty()) {
+      const saved = await performSave();
+      if (!saved && isSavingRef.current) {
+        let waitCount = 0;
+        while (isSavingRef.current && waitCount < 10) {
+          await new Promise((r) => setTimeout(r, 100));
+          waitCount++;
+        }
+      }
+    }
+
     setGenerating(true);
     setProgress(5);
     setStage("Writing your answer...");
@@ -298,7 +457,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
     } finally {
       setTimeout(() => setGenerating(false), 350);
     }
-  }, [content, question, assignmentMode, settings, project.id]);
+  }, [content, question, assignmentMode, settings, project.id, isDirty, performSave]);
 
   if (pages) {
     return <ResultView pages={pages} projectName={name} onBack={() => setPages(null)} />;
@@ -339,6 +498,21 @@ export function EditorWorkspace({ project }: { project: Project }) {
             <span className="hidden text-xs text-muted-foreground sm:block">
               {words} words · {Math.max(previewPages, 1)} page{previewPages > 1 ? "s" : ""}
             </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void performSave()}
+              disabled={saveState === "saving"}
+              title="Save changes (Ctrl+S)"
+              className="h-9 gap-1.5"
+            >
+              {saveState === "saving" ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Save className="size-3.5" />
+              )}
+              Save
+            </Button>
             <Button onClick={generate} disabled={generating}>
               {generating ? <Spinner /> : <Wand2 className="size-4" />}
               Generate
