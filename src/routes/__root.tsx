@@ -76,7 +76,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { property: "og:site_name", content: "HandText AI" },
+      { property: "og:site_name", content: "HandText" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -88,7 +88,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Caveat:wght@400;500;600&family=Kalam:wght@300;400;700&family=Patrick+Hand&family=Shadows+Into+Light&family=Indie+Flower&family=Gloria+Hallelujah&display=swap",
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+      { rel: "icon", href: "/favicon.ico", sizes: "any" },
     ],
   }),
   shellComponent: RootShell,

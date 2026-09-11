@@ -10,9 +10,7 @@ export function Logo({ className = "" }: { className?: string }) {
       <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
         <PenLine className="size-4" />
       </span>
-      <span className="text-lg">
-        HandText <span className="text-primary">AI</span>
-      </span>
+      <span className="text-lg">HandText</span>
     </Link>
   );
 }

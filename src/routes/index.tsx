@@ -19,13 +19,13 @@ import { Badge, Button, Card } from "@/components/ui/primitives";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "HandText AI — Turn typed answers into handwritten pages" },
+      { title: "HandText — Turn typed answers into handwritten pages" },
       {
         name: "description",
         content:
           "Paste your answer, pick a handwriting style, customise the page and export realistic handwritten answer sheets as PDF or PNG.",
       },
-      { property: "og:title", content: "HandText AI — Realistic handwritten answer sheets" },
+      { property: "og:title", content: "HandText — Realistic handwritten answer sheets" },
       {
         property: "og:description",
         content: "Convert typed assignments and notes into realistic handwritten pages, ready to print or export.",
@@ -119,7 +119,7 @@ function Landing() {
                   {HERO_ANSWER}
                 </pre>
                 <div className="mt-4 flex items-center gap-2 text-xs font-semibold text-primary">
-                  HandText AI <ArrowRight className="size-3" />
+                  HandText <ArrowRight className="size-3" />
                 </div>
               </Card>
               <HandwrittenSample
@@ -177,7 +177,7 @@ function Landing() {
         <section id="examples" className="mx-auto max-w-6xl px-4 py-16">
           <h2 className="text-3xl font-extrabold tracking-tight">Example gallery</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            All pages below are generated examples produced by HandText AI.
+            All pages below are generated examples produced by HandText.
           </p>
           <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {[

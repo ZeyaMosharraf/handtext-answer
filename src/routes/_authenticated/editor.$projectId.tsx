@@ -8,9 +8,9 @@ import { getProject } from "@/lib/projects";
 export const Route = createFileRoute("/_authenticated/editor/$projectId")({
   head: () => ({
     meta: [
-      { title: "Editor — HandText AI" },
+      { title: "Editor — HandText" },
       { name: "description", content: "Write your answer, choose a handwriting style and generate handwritten pages." },
-      { property: "og:title", content: "Editor — HandText AI" },
+      { property: "og:title", content: "Editor — HandText" },
       { property: "og:description", content: "Convert your typed answer into handwritten pages." },
       { name: "robots", content: "noindex" },
     ],

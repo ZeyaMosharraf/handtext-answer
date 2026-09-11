@@ -14,9 +14,9 @@ import { supabase } from "@/integrations/supabase/client";
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
     meta: [
-      { title: "Settings — HandText AI" },
+      { title: "Settings — HandText" },
       { name: "description", content: "Manage your profile, handwriting defaults, plan and account." },
-      { property: "og:title", content: "Settings — HandText AI" },
+      { property: "og:title", content: "Settings — HandText" },
       { property: "og:description", content: "Profile, preferences and account settings." },
       { name: "robots", content: "noindex" },
     ],

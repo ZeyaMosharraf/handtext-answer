@@ -11,9 +11,9 @@ import { supabase } from "@/integrations/supabase/client";
 export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
-      { title: "Sign in — HandText AI" },
-      { name: "description", content: "Sign in or create a free HandText AI account to generate handwritten answer sheets." },
-      { property: "og:title", content: "Sign in — HandText AI" },
+      { title: "Sign in — HandText" },
+      { name: "description", content: "Sign in or create a free HandText account to generate handwritten answer sheets." },
+      { property: "og:title", content: "Sign in — HandText" },
       { property: "og:description", content: "Access your handwritten answer projects." },
       { name: "robots", content: "noindex" },
     ],
@@ -157,7 +157,7 @@ function AuthPage() {
           </form>
 
           <p className="mt-5 text-center text-sm text-muted-foreground">
-            {mode === "login" ? "New to HandText AI?" : "Already have an account?"}{" "}
+            {mode === "login" ? "New to HandText?" : "Already have an account?"}{" "}
             <button
               type="button"
               className="font-semibold text-primary hover:underline"

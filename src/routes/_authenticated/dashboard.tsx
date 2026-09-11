@@ -13,9 +13,9 @@ import { createProject, deleteProject, listProjects } from "@/lib/projects";
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
     meta: [
-      { title: "My projects — HandText AI" },
+      { title: "My projects — HandText" },
       { name: "description", content: "All your handwritten answer projects in one place." },
-      { property: "og:title", content: "My projects — HandText AI" },
+      { property: "og:title", content: "My projects — HandText" },
       { property: "og:description", content: "Open, create and manage your handwritten answer sheets." },
       { name: "robots", content: "noindex" },
     ],

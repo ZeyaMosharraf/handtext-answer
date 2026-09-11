@@ -8,12 +8,12 @@ import { PLANS } from "@/lib/plans";
 export const Route = createFileRoute("/pricing")({
   head: () => ({
     meta: [
-      { title: "Pricing — HandText AI" },
+      { title: "Pricing — HandText" },
       {
         name: "description",
         content: "Simple plans for students: a free tier, a Pro plan with unlimited styles and a discounted Student plan.",
       },
-      { property: "og:title", content: "Pricing — HandText AI" },
+      { property: "og:title", content: "Pricing — HandText" },
       { property: "og:description", content: "Free, Pro and Student plans for handwritten answer sheets." },
     ],
   }),
