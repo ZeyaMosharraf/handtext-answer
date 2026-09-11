@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Bold,
   Check,
+  Cloud,
   CloudOff,
   Highlighter,
   Italic,
@@ -40,6 +41,7 @@ import {
   type PageCoordinateSystem,
 } from "@/lib/handwriting";
 import { htmlToPlainText, migrateLegacyContentToHtml, plainTextToHtml } from "@/lib/handwriting/parse";
+import { getLocalDraft, markLocalDraftSynced, saveLocalDraft } from "@/lib/local-drafts";
 import {
   isProjectSnapshotEqual,
   recordUsage,
@@ -50,7 +52,7 @@ import {
 import { loadTemplates, persistTemplates, type SavedTemplate } from "@/lib/templates";
 import { cn } from "@/lib/utils";
 
-const AUTOSAVE_DELAY_MS = 3500;
+const AUTOSAVE_DELAY_MS = 3000;
 
 type Tab = "content" | "preview" | "design";
 
@@ -133,8 +135,9 @@ export function EditorWorkspace({ project }: { project: Project }) {
     });
   }, []);
 
-  /* ---------------------- client-side persistence & dirty tracking ----------- */
-  const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
+  /* ---------------------- client-side persistence & local autosave ----------- */
+  type SaveState = "saved" | "saved-locally" | "saving-cloud" | "error";
+  const [saveState, setSaveState] = useState<SaveState>("saved");
 
   const initialSnapshot = useMemo<ProjectSnapshot>(
     () => ({
@@ -144,10 +147,11 @@ export function EditorWorkspace({ project }: { project: Project }) {
       settings: project.settings,
       assignmentMode: Boolean(project.question),
     }),
-    [project],
+    [project.name, project.question, project.content, project.settings],
   );
 
-  const lastSavedSnapshotRef = useRef<ProjectSnapshot>(initialSnapshot);
+  const lastCloudSavedSnapshotRef = useRef<ProjectSnapshot>(initialSnapshot);
+  const lastLocalSavedSnapshotRef = useRef<ProjectSnapshot>(initialSnapshot);
   const currentDraftRef = useRef<ProjectSnapshot>(initialSnapshot);
 
   // Keep currentDraftRef updated with latest values for async access
@@ -160,37 +164,109 @@ export function EditorWorkspace({ project }: { project: Project }) {
   };
 
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isSavingRef = useRef(false);
-  const pendingSaveRef = useRef(false);
+  const isCloudSavingRef = useRef(false);
+  const pendingCloudSaveRef = useRef(false);
   const isMountedRef = useRef(false);
 
-  const isDirty = useCallback((): boolean => {
-    return !isProjectSnapshotEqual(currentDraftRef.current, lastSavedSnapshotRef.current);
+  // Check and restore local draft from IndexedDB on initial load
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function checkAndRestoreLocalDraft() {
+      try {
+        const localRecord = await getLocalDraft(project.user_id, project.id);
+        if (isCancelled || !localRecord || !localRecord.draft) return;
+
+        const cloudUpdatedTimestamp = project.updated_at ? new Date(project.updated_at).getTime() : 0;
+        const hasUnsyncedEdits = !localRecord.isSynced && !isProjectSnapshotEqual(localRecord.draft, initialSnapshot);
+        const isLocalNewer = localRecord.savedAt > cloudUpdatedTimestamp && !isProjectSnapshotEqual(localRecord.draft, initialSnapshot);
+
+        if (hasUnsyncedEdits || isLocalNewer) {
+          setName(localRecord.draft.name);
+          setDraft({
+            question: localRecord.draft.question,
+            content: localRecord.draft.content,
+            settings: localRecord.draft.settings,
+          });
+          setAssignmentMode(localRecord.draft.assignmentMode);
+
+          currentDraftRef.current = { ...localRecord.draft };
+          lastLocalSavedSnapshotRef.current = { ...localRecord.draft };
+          setSaveState("saved-locally");
+          toast.info("Restored your local draft");
+        }
+      } catch (err) {
+        console.error("Failed to restore local draft from IndexedDB:", err);
+      }
+    }
+
+    void checkAndRestoreLocalDraft();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [project.id, project.user_id, project.updated_at, initialSnapshot]);
+
+  const isDirtyLocally = useCallback((): boolean => {
+    return !isProjectSnapshotEqual(currentDraftRef.current, lastLocalSavedSnapshotRef.current);
   }, []);
 
-  const performSave = useCallback(async (): Promise<boolean> => {
+  const isDirtyCloud = useCallback((): boolean => {
+    return !isProjectSnapshotEqual(currentDraftRef.current, lastCloudSavedSnapshotRef.current);
+  }, []);
+
+  // Autosave locally to IndexedDB - NEVER touches Supabase
+  const performLocalSave = useCallback(async () => {
+    const snapshotToPersist = { ...currentDraftRef.current };
+    try {
+      const isSynced = isProjectSnapshotEqual(snapshotToPersist, lastCloudSavedSnapshotRef.current);
+      await saveLocalDraft(project.user_id, project.id, snapshotToPersist, {
+        isSynced,
+        cloudUpdatedAt: project.updated_at,
+      });
+      lastLocalSavedSnapshotRef.current = snapshotToPersist;
+      setSaveState(isSynced ? "saved" : "saved-locally");
+    } catch (err) {
+      console.error("Failed to autosave locally:", err);
+    }
+  }, [project.id, project.user_id, project.updated_at]);
+
+  // Explicit Save / Ctrl+S to Supabase - ONLY path that updates cloud
+  const performCloudSave = useCallback(async (): Promise<boolean> => {
     // 1. Cancel pending debounce timer
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
     }
 
-    // 2. If nothing changed, do not touch database
-    if (!isDirty()) {
-      if (saveState !== "saved") setSaveState("saved");
+    const snapshotToPersist = { ...currentDraftRef.current };
+
+    // 2. Ensure latest draft is in IndexedDB
+    try {
+      await saveLocalDraft(project.user_id, project.id, snapshotToPersist, {
+        isSynced: false,
+        cloudUpdatedAt: project.updated_at,
+      });
+      lastLocalSavedSnapshotRef.current = snapshotToPersist;
+    } catch (err) {
+      console.error("Failed to update local draft before cloud save:", err);
+    }
+
+    // 3. If already identical to confirmed cloud snapshot, skip Supabase PATCH
+    if (isProjectSnapshotEqual(snapshotToPersist, lastCloudSavedSnapshotRef.current)) {
+      setSaveState("saved");
+      await markLocalDraftSynced(project.user_id, project.id, project.updated_at);
       return true;
     }
 
-    // 3. Prevent concurrent writes
-    if (isSavingRef.current) {
-      pendingSaveRef.current = true;
+    // 4. Prevent concurrent cloud saves
+    if (isCloudSavingRef.current) {
+      pendingCloudSaveRef.current = true;
       return false;
     }
 
-    isSavingRef.current = true;
-    setSaveState("saving");
-
-    const snapshotToPersist = { ...currentDraftRef.current };
+    isCloudSavingRef.current = true;
+    setSaveState("saving-cloud");
 
     try {
       await updateProject(project.id, {
@@ -200,26 +276,25 @@ export function EditorWorkspace({ project }: { project: Project }) {
         settings: snapshotToPersist.settings,
       });
 
-      lastSavedSnapshotRef.current = snapshotToPersist;
+      lastCloudSavedSnapshotRef.current = snapshotToPersist;
+      const nowIso = new Date().toISOString();
+      await markLocalDraftSynced(project.user_id, project.id, nowIso);
       setSaveState("saved");
+      toast.success("Saved");
       return true;
     } catch (error) {
-      console.error("Failed to save project:", error);
+      console.error("Failed to save project to Supabase:", error);
       setSaveState("error");
+      toast.error("Could not save to cloud. Your draft is saved locally.");
       return false;
     } finally {
-      isSavingRef.current = false;
-
-      // If changes were made while save was in-flight, trigger follow-up debounced save
-      if (pendingSaveRef.current || isDirty()) {
-        pendingSaveRef.current = false;
-        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-        autosaveTimerRef.current = setTimeout(() => {
-          void performSave();
-        }, AUTOSAVE_DELAY_MS);
+      isCloudSavingRef.current = false;
+      if (pendingCloudSaveRef.current) {
+        pendingCloudSaveRef.current = false;
+        void performCloudSave();
       }
     }
-  }, [isDirty, project.id, saveState]);
+  }, [project.id, project.user_id, project.updated_at]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -231,42 +306,38 @@ export function EditorWorkspace({ project }: { project: Project }) {
         else undo();
       } else if (key === "s") {
         e.preventDefault();
-        void performSave();
+        void performCloudSave();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, performSave]);
+  }, [undo, redo, performCloudSave]);
 
-  // Safeguard against tab closure with unsaved changes
+  // Safeguard against tab closure with unsaved cloud changes
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (isDirty()) {
+      if (isDirtyCloud()) {
         e.preventDefault();
         e.returnValue = "";
       }
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isDirty]);
+  }, [isDirtyCloud]);
 
-  // Flush dirty changes on unmount so navigation doesn't lose edits
+  // Flush latest draft to IndexedDB on unmount
   useEffect(() => {
     return () => {
       if (autosaveTimerRef.current) {
         clearTimeout(autosaveTimerRef.current);
       }
-      if (isDirty()) {
-        const snap = currentDraftRef.current;
-        void updateProject(project.id, {
-          name: snap.name.trim() || "Untitled answer",
-          question: snap.assignmentMode ? snap.question : "",
-          content: snap.content,
-          settings: snap.settings,
-        }).catch(() => undefined);
-      }
+      const snap = currentDraftRef.current;
+      void saveLocalDraft(project.user_id, project.id, snap, {
+        isSynced: isProjectSnapshotEqual(snap, lastCloudSavedSnapshotRef.current),
+        cloudUpdatedAt: project.updated_at,
+      }).catch(() => undefined);
     };
-  }, [isDirty, project.id]);
+  }, [project.id, project.user_id, project.updated_at]);
 
   /* -------------------------------- templates ------------------------------- */
   const [templates, setTemplates] = useState<SavedTemplate[]>([]);
@@ -314,7 +385,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
     return () => observer.disconnect();
   }, [writeOnPage]);
 
-  /* --------------------------------- debounced autosave ---------------------- */
+  /* --------------------------------- debounced local autosave ----------------- */
   useEffect(() => {
     if (!isMountedRef.current) {
       isMountedRef.current = true;
@@ -326,14 +397,13 @@ export function EditorWorkspace({ project }: { project: Project }) {
       autosaveTimerRef.current = null;
     }
 
-    // If draft is currently clean, do not start any timer
-    if (!isDirty()) {
+    // If draft has not changed from what is in IndexedDB, do nothing
+    if (!isDirtyLocally()) {
       return;
     }
 
-    // Debounce: do NOT call setSaveState("saving") until save begins
     autosaveTimerRef.current = setTimeout(() => {
-      void performSave();
+      void performLocalSave();
     }, AUTOSAVE_DELAY_MS);
 
     return () => {
@@ -342,7 +412,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
         autosaveTimerRef.current = null;
       }
     };
-  }, [name, question, content, settings, assignmentMode, isDirty, performSave]);
+  }, [name, question, content, settings, assignmentMode, isDirtyLocally, performLocalSave]);
 
   /* -------------------------------- live preview ------------------------------ */
   const previewInput = useMemo(
@@ -419,17 +489,12 @@ export function EditorWorkspace({ project }: { project: Project }) {
       autosaveTimerRef.current = null;
     }
 
-    // Persist latest draft first if dirty so generation operates on confirmed saved state
-    if (isDirty()) {
-      const saved = await performSave();
-      if (!saved && isSavingRef.current) {
-        let waitCount = 0;
-        while (isSavingRef.current && waitCount < 10) {
-          await new Promise((r) => setTimeout(r, 100));
-          waitCount++;
-        }
-      }
-    }
+    // Persist to local IndexedDB to guarantee offline safety
+    await saveLocalDraft(project.user_id, project.id, currentDraftRef.current, {
+      isSynced: isProjectSnapshotEqual(currentDraftRef.current, lastCloudSavedSnapshotRef.current),
+      cloudUpdatedAt: project.updated_at,
+    });
+    lastLocalSavedSnapshotRef.current = { ...currentDraftRef.current };
 
     setGenerating(true);
     setProgress(5);
@@ -457,7 +522,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
     } finally {
       setTimeout(() => setGenerating(false), 350);
     }
-  }, [content, question, assignmentMode, settings, project.id, isDirty, performSave]);
+  }, [content, question, assignmentMode, settings, project.id, project.user_id, project.updated_at]);
 
   if (pages) {
     return <ResultView pages={pages} projectName={name} onBack={() => setPages(null)} />;
@@ -483,10 +548,35 @@ export function EditorWorkspace({ project }: { project: Project }) {
             className="h-9 max-w-xs flex-1 border-transparent bg-transparent px-2 text-base font-semibold hover:border-border"
           />
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            {saveState === "saving" && <Loader2 className="size-3 animate-spin" />}
-            {saveState === "saved" && <Check className="size-3 text-[color:var(--success)]" />}
-            {saveState === "error" && <CloudOff className="size-3 text-destructive" />}
-            {saveState === "saving" ? "Saving" : saveState === "saved" ? "Saved" : "Not saved"}
+            {saveState === "saving-cloud" && (
+              <>
+                <Loader2 className="size-3 animate-spin text-primary" />
+                <span>Saving…</span>
+              </>
+            )}
+            {saveState === "saved-locally" && (
+              <>
+                <span className="flex items-center gap-1 font-medium text-[color:var(--success)]">
+                  <Check className="size-3" /> Saved locally
+                </span>
+                <span className="text-muted-foreground/60">·</span>
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <Cloud className="size-3" /> Unsaved to cloud
+                </span>
+              </>
+            )}
+            {saveState === "saved" && (
+              <>
+                <Check className="size-3 text-[color:var(--success)]" />
+                <span>Saved</span>
+              </>
+            )}
+            {saveState === "error" && (
+              <>
+                <CloudOff className="size-3 text-destructive" />
+                <span className="text-destructive">Not saved to cloud</span>
+              </>
+            )}
           </span>
           <div className="ml-auto flex items-center gap-2">
             <Button variant="ghost" size="icon" aria-label="Undo" onClick={undo} disabled={past.current.length === 0}>
@@ -501,12 +591,12 @@ export function EditorWorkspace({ project }: { project: Project }) {
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => void performSave()}
-              disabled={saveState === "saving"}
-              title="Save changes (Ctrl+S)"
+              onClick={() => void performCloudSave()}
+              disabled={saveState === "saving-cloud"}
+              title="Save to cloud (Ctrl+S)"
               className="h-9 gap-1.5"
             >
-              {saveState === "saving" ? (
+              {saveState === "saving-cloud" ? (
                 <Loader2 className="size-3.5 animate-spin" />
               ) : (
                 <Save className="size-3.5" />
