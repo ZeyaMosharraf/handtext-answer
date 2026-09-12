@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { withDefaults, type HandwritingSettings } from "@/lib/handwriting";
+import { planById } from "@/lib/plans";
 
 export interface Project {
   id: string;
@@ -54,12 +55,15 @@ export async function updateProject(
   patch: Partial<Pick<Project, "name" | "question" | "content" | "page_count" | "status">> & {
     settings?: HandwritingSettings;
   },
-) {
-  const { error } = await supabase
+): Promise<Project> {
+  const { data, error } = await supabase
     .from("projects")
     .update(patch as unknown as never)
-    .eq("id", id);
+    .eq("id", id)
+    .select("*")
+    .single();
   if (error) throw error;
+  return normalise(data);
 }
 
 export async function deleteProject(id: string) {
@@ -82,6 +86,67 @@ export async function getProfile() {
   if (!userId) return null;
   const { data } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
   return data;
+}
+
+export interface UserUsageInfo {
+  planId: "free" | "pro" | "student";
+  planName: string;
+  monthlyPageLimit: number | null;
+  pagesUsedThisMonth: number;
+  pagesRemaining: number | null;
+  totalProjectsCount: number;
+}
+
+export async function getUserUsage(): Promise<UserUsageInfo> {
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) {
+    const freePlan = planById("free");
+    return {
+      planId: "free",
+      planName: freePlan.name,
+      monthlyPageLimit: freePlan.monthlyPageLimit,
+      pagesUsedThisMonth: 0,
+      pagesRemaining: freePlan.monthlyPageLimit,
+      totalProjectsCount: 0,
+    };
+  }
+
+  const { data: profile } = await supabase.from("profiles").select("plan").eq("id", userId).maybeSingle();
+  const plan = planById(profile?.plan ?? "free");
+
+  const now = new Date();
+  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+
+  const { data: usageRows } = await supabase
+    .from("usage")
+    .select("pages_generated, generation_date")
+    .eq("user_id", userId)
+    .gte("generation_date", firstDayOfMonth);
+
+  const pagesUsedThisMonth = (usageRows ?? []).reduce(
+    (sum, row) => sum + (row.pages_generated ?? 0),
+    0,
+  );
+
+  const { count } = await supabase
+    .from("projects")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId);
+
+  const pagesRemaining =
+    plan.monthlyPageLimit === null
+      ? null
+      : Math.max(0, plan.monthlyPageLimit - pagesUsedThisMonth);
+
+  return {
+    planId: plan.id,
+    planName: plan.name,
+    monthlyPageLimit: plan.monthlyPageLimit,
+    pagesUsedThisMonth,
+    pagesRemaining,
+    totalProjectsCount: count ?? 0,
+  };
 }
 
 export interface ProjectSnapshot {
@@ -123,6 +188,6 @@ export function isProjectSnapshotEqual(a: ProjectSnapshot, b: ProjectSnapshot): 
   const qA = a.assignmentMode ? a.question.trim() : "";
   const qB = b.assignmentMode ? b.question.trim() : "";
   if (qA !== qB) return false;
-  if (a.content !== b.content) return false;
+  if (a.content.trim() !== b.content.trim()) return false;
   return deepEqual(a.settings, b.settings);
 }

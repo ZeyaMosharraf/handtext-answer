@@ -16,6 +16,98 @@ export interface Seg {
   underline: boolean;
   italic?: boolean;
   color?: string;
+  scale?: number; // Normalized relative handwriting scale: 0.85, 1.0, 1.2, 1.4
+  highlight?: string; // Hex color for translucent highlighter wash, e.g. #fef08a
+}
+
+export function normalizeFontScale(rawScale: number): number {
+  if (rawScale <= 0.92) return 0.85; // Small
+  if (rawScale <= 1.1) return 1.0;   // Normal
+  if (rawScale <= 1.3) return 1.2;   // Medium
+  return 1.4;                        // Large
+}
+
+function rgbToHex(rgbStr: string): string | null {
+  const m = rgbStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (!m || !m[1] || !m[2] || !m[3]) return null;
+  const r = parseInt(m[1], 10).toString(16).padStart(2, "0");
+  const g = parseInt(m[2], 10).toString(16).padStart(2, "0");
+  const b = parseInt(m[3], 10).toString(16).padStart(2, "0");
+  return `#${r}${g}${b}`;
+}
+
+function extractScale(attrs: string, tag: string): number | undefined {
+  const dataMatch = attrs.match(/data-scale=["']?([0-9.]+)/i);
+  if (dataMatch?.[1]) {
+    return normalizeFontScale(parseFloat(dataMatch[1]));
+  }
+  const emMatch = attrs.match(/font-size:\s*([0-9.]+)em/i);
+  if (emMatch?.[1]) {
+    return normalizeFontScale(parseFloat(emMatch[1]));
+  }
+  const pctMatch = attrs.match(/font-size:\s*([0-9.]+)%/i);
+  if (pctMatch?.[1]) {
+    return normalizeFontScale(parseFloat(pctMatch[1]) / 100);
+  }
+  const fontMatch = tag === "FONT" ? attrs.match(/size=["']?([1-7])/i) : null;
+  if (fontMatch?.[1]) {
+    const sz = parseInt(fontMatch[1], 10);
+    if (sz <= 2) return 0.85;
+    if (sz === 3 || sz === 4) return 1.0;
+    if (sz === 5) return 1.2;
+    return 1.4;
+  }
+  if (tag === "BIG") return 1.2;
+  if (tag === "SMALL") return 0.85;
+  return undefined;
+}
+
+function extractColor(attrs: string, tag: string): string | undefined {
+  const dataColor = attrs.match(/data-color=["']?([^"'\s>]+)/i);
+  if (dataColor?.[1] && dataColor[1] !== "inherit") return dataColor[1];
+
+  const fontColor = tag === "FONT" ? attrs.match(/color=["']?([^"'\s>]+)/i) : null;
+  if (fontColor?.[1] && fontColor[1] !== "inherit") {
+    const val = fontColor[1];
+    return val.startsWith("rgb") ? (rgbToHex(val) ?? val) : val;
+  }
+
+  const styleColor = attrs.match(/(?:^|;|\s|["'])color:\s*([^;"]+)/i);
+  if (styleColor?.[1] && styleColor[1].trim() !== "inherit") {
+    const val = styleColor[1].trim();
+    return val.startsWith("rgb") ? (rgbToHex(val) ?? val) : val;
+  }
+
+  return undefined;
+}
+
+function extractHighlight(attrs: string, tag: string): string | undefined {
+  const dataHigh = attrs.match(/data-highlight=["']?([^"'\s>]+)/i);
+  if (dataHigh?.[1] && dataHigh[1] !== "transparent") return dataHigh[1];
+
+  const styleHigh = attrs.match(/(?:^|;|\s|["'])(?:background-color|background):\s*([^;"]+)/i);
+  if (styleHigh?.[1]) {
+    const val = styleHigh[1].trim();
+    if (val !== "transparent" && val !== "inherit" && val !== "none") {
+      return val.startsWith("rgb") ? (rgbToHex(val) ?? val) : val;
+    }
+  }
+
+  if (tag === "MARK") {
+    return "#fef08a"; // Default yellow highlighter wash
+  }
+
+  return undefined;
+}
+
+interface StyleFrame {
+  tag: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  color?: string | undefined;
+  scale?: number | undefined;
+  highlight?: string | undefined;
 }
 
 export interface TableData {
@@ -118,10 +210,10 @@ function unescapeHtml(str: string): string {
 export function parseInlineHtml(innerHtml: string): Seg[] {
   const segs: Seg[] = [];
   const tokenRe = /<(\/)?([a-z0-9]+)([^>]*)>|([^<]+)/gi;
+  const stack: StyleFrame[] = [];
   let boldCount = 0;
   let italicCount = 0;
   let underlineCount = 0;
-  let currentColor: string | undefined = undefined;
 
   let match: RegExpExecArray | null;
   while ((match = tokenRe.exec(innerHtml)) !== null) {
@@ -133,12 +225,18 @@ export function parseInlineHtml(innerHtml: string): Seg[] {
     if (textPart) {
       const decoded = unescapeHtml(textPart);
       if (decoded) {
+        const activeColor = stack.map((f) => f.color).filter(Boolean).at(-1);
+        const activeScale = stack.map((f) => f.scale).filter(Boolean).at(-1);
+        const activeHighlight = stack.map((f) => f.highlight).filter(Boolean).at(-1);
+
         segs.push({
           text: decoded,
           bold: boldCount > 0,
           italic: italicCount > 0,
           underline: underlineCount > 0,
-          ...(currentColor ? { color: currentColor } : {}),
+          ...(activeColor ? { color: activeColor } : {}),
+          ...(activeScale ? { scale: activeScale } : {}),
+          ...(activeHighlight ? { highlight: activeHighlight } : {}),
         });
       }
       continue;
@@ -147,12 +245,17 @@ export function parseInlineHtml(innerHtml: string): Seg[] {
     if (!tag) continue;
 
     if (tag === "BR") {
+      const activeColor = stack.map((f) => f.color).filter(Boolean).at(-1);
+      const activeScale = stack.map((f) => f.scale).filter(Boolean).at(-1);
+      const activeHighlight = stack.map((f) => f.highlight).filter(Boolean).at(-1);
       segs.push({
         text: "\n",
         bold: boldCount > 0,
         italic: italicCount > 0,
         underline: underlineCount > 0,
-        ...(currentColor ? { color: currentColor } : {}),
+        ...(activeColor ? { color: activeColor } : {}),
+        ...(activeScale ? { scale: activeScale } : {}),
+        ...(activeHighlight ? { highlight: activeHighlight } : {}),
       });
       continue;
     }
@@ -161,24 +264,30 @@ export function parseInlineHtml(innerHtml: string): Seg[] {
       if (tag === "STRONG" || tag === "B") boldCount = Math.max(0, boldCount - 1);
       else if (tag === "EM" || tag === "I") italicCount = Math.max(0, italicCount - 1);
       else if (tag === "U") underlineCount = Math.max(0, underlineCount - 1);
-      else if (tag === "MARK" || tag === "SPAN" || tag === "FONT") currentColor = undefined;
-    } else {
-      if (tag === "STRONG" || tag === "B") boldCount++;
-      else if (tag === "EM" || tag === "I") italicCount++;
-      else if (tag === "U") underlineCount++;
-      else if (tag === "MARK") {
-        currentColor = HIGHLIGHT_COLOR;
-        boldCount++;
-      } else if (tag === "SPAN" || tag === "FONT") {
-        if (
-          attrs.includes(HIGHLIGHT_COLOR) ||
-          attrs.includes("141821") ||
-          attrs.includes("rgb(20, 24, 33)") ||
-          attrs.includes("rgb(20,24,33)") ||
-          (tag === "FONT" && attrs.includes("color"))
-        ) {
-          currentColor = HIGHLIGHT_COLOR;
+
+      // Pop matching frame from top of stack
+      for (let i = stack.length - 1; i >= 0; i--) {
+        const frame = stack[i];
+        if (frame && frame.tag === tag) {
+          stack.splice(i, 1);
+          break;
         }
+      }
+    } else {
+      if (tag === "STRONG" || tag === "B") {
+        boldCount++;
+        stack.push({ tag, bold: true });
+      } else if (tag === "EM" || tag === "I") {
+        italicCount++;
+        stack.push({ tag, italic: true });
+      } else if (tag === "U") {
+        underlineCount++;
+        stack.push({ tag, underline: true });
+      } else {
+        const color = extractColor(attrs, tag);
+        const scale = extractScale(attrs, tag);
+        const highlight = extractHighlight(attrs, tag);
+        stack.push({ tag, color, scale, highlight });
       }
     }
   }
@@ -193,7 +302,9 @@ export function parseInlineHtml(innerHtml: string): Seg[] {
       last.bold === seg.bold &&
       last.italic === seg.italic &&
       last.underline === seg.underline &&
-      last.color === seg.color
+      last.color === seg.color &&
+      last.scale === seg.scale &&
+      last.highlight === seg.highlight
     ) {
       last.text += seg.text;
     } else {
@@ -305,6 +416,11 @@ export function parseHtmlContent(html: string): Block[] {
       if (rows.length > 0) {
         blocks.push({ kind: "table", text: "", table: { rows, headerRow } });
       }
+      continue;
+    }
+
+    if (tag === "div" && /<(h1|h2|h3|h4|blockquote|hr|table|ul|ol|p|div)\b/i.test(inner)) {
+      blocks.push(...parseHtmlContent(inner));
       continue;
     }
 

@@ -23,7 +23,8 @@ function EditorPage() {
   const { data: project, isLoading, isError } = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => getProject(projectId),
-    staleTime: Infinity,
+    staleTime: 30000,
+    retry: 3,
   });
 
   if (isLoading) {

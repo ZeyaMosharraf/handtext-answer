@@ -12,7 +12,7 @@ export interface LocalDraftRecord {
 
 const DB_NAME = "handtext-local";
 const STORE_NAME = "drafts";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 

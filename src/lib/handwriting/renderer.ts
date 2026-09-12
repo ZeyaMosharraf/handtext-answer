@@ -94,6 +94,58 @@ function handUnderline(
   ctx.restore();
 }
 
+function drawHighlighterWash(
+  ctx: CanvasRenderingContext2D,
+  startX: number,
+  endX: number,
+  baselineY: number,
+  fontSize: number,
+  highlightColor: string,
+  random: () => number,
+) {
+  if (endX <= startX) return;
+  ctx.save();
+  ctx.fillStyle = highlightColor;
+  ctx.globalAlpha = 0.34;
+  const padX = 3;
+  const x = startX - padX;
+  const w = endX - startX + padX * 2;
+  const top = baselineY - fontSize * 0.82 + (random() - 0.5) * 1.5;
+  const h = fontSize * 1.05 + (random() - 0.5) * 1.2;
+  const radius = 3;
+
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(x, top, w, h, radius);
+  } else {
+    ctx.rect(x, top, w, h);
+  }
+  ctx.fill();
+  ctx.restore();
+}
+
+function estimateSegmentWidth(
+  ctx: CanvasRenderingContext2D,
+  segment: Seg,
+  settings: HandwritingSettings,
+  scale: number,
+  size: number,
+) {
+  const segScale = scale * (segment.scale ?? 1);
+  ctx.font = `${segment.italic ? "italic " : ""}${size}px "${settings.fontFamily}", cursive`;
+  let w = 0;
+  for (const ch of segment.text) {
+    if (ch === " ") {
+      w += settings.wordSpacing * (1 - settings.writingSpeed * 0.18) * segScale;
+    } else {
+      w +=
+        ctx.measureText(ch).width * settings.compactness * (1 - settings.writingSpeed * 0.06) +
+        settings.letterSpacing * segScale * (1 - settings.writingSpeed * 0.3);
+    }
+  }
+  return w;
+}
+
 function writeSegments(
   ctx: CanvasRenderingContext2D,
   segments: Seg[],
@@ -114,6 +166,7 @@ function writeSegments(
   for (const segment of segments) {
     if (!segment.text) continue;
     const segmentStart = x;
+    const segScale = scale * (segment.scale ?? 1);
     const color = segment.color ?? pen.color;
     const isBlackInk = Boolean(
       segment.color &&
@@ -123,17 +176,38 @@ function writeSegments(
           segment.color.includes("20, 24, 33") ||
           segment.color.includes("20,24,33")),
     );
+
+    // Draw soft fluorescent highlighter wash behind the segment if active
+    if (segment.highlight) {
+      const estimatedWidth = estimateSegmentWidth(
+        ctx,
+        segment,
+        settings,
+        scale,
+        pen.size * (segment.scale ?? 1),
+      );
+      drawHighlighterWash(
+        ctx,
+        segmentStart,
+        segmentStart + estimatedWidth,
+        baselineY,
+        pen.size * (segment.scale ?? 1),
+        segment.highlight,
+        random,
+      );
+    }
+
     for (const character of segment.text) {
       if (character === " ") {
         x +=
           (settings.wordSpacing + (random() - 0.5) * settings.wordSpacing * 0.35 * settings.imperfection) *
           (1 - speed * 0.18) *
-          scale;
+          segScale;
         continue;
       }
       const sizeJitter = 1 + (random() - 0.5) * 0.07 * settings.charVariation;
       const widthJitter = 1 + (random() - 0.5) * 0.05 * settings.charVariation;
-      const size = pen.size * sizeJitter;
+      const size = pen.size * (segment.scale ?? 1) * sizeJitter;
       const italicSlant = segment.italic ? 12 : 0;
       const slant = (settings.slant + italicSlant + (random() - 0.5) * settings.slantVariation + speed * 1.2) * (Math.PI / 180);
       const rotation = (random() - 0.5) * 0.012 * settings.imperfection * 6;
@@ -163,7 +237,7 @@ function writeSegments(
       ctx.restore();
 
       ctx.font = `${segment.italic ? "italic " : ""}${size}px "${settings.fontFamily}", cursive`;
-      x += ctx.measureText(character).width * horizontal + settings.letterSpacing * scale * (1 - speed * 0.3);
+      x += ctx.measureText(character).width * horizontal + settings.letterSpacing * segScale * (1 - speed * 0.3);
     }
     if (segment.underline) handUnderline(ctx, settings, segmentStart, x, baselineY + 7, color, random);
   }

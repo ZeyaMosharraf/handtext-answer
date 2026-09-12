@@ -7,6 +7,11 @@ export interface FormatState {
   italic: boolean;
   underline: boolean;
   blackInk: boolean;
+  color?: string | undefined;
+  scale?: number | undefined;
+  highlight?: string | undefined;
+  hasSelection: boolean;
+  selectionRect?: { top: number; left: number; width: number; height: number } | undefined;
 }
 
 export interface RichContentEditorHandle {
@@ -14,6 +19,10 @@ export interface RichContentEditorHandle {
   toggleItalic: () => void;
   toggleUnderline: () => void;
   toggleBlackInk: () => void;
+  setFontScale: (scale: number | null) => void;
+  setTextColor: (color: string | null) => void;
+  setHighlight: (color: string | null) => void;
+  clearFormatting: () => void;
   insertTable: (rows: number, cols: number) => void;
   focus: () => void;
   getFormatState: () => FormatState;
@@ -27,47 +36,13 @@ interface RichContentEditorProps {
   onFormatChange?: (state: FormatState) => void;
 }
 
-function checkBlackInkActive(): boolean {
-  if (typeof window === "undefined" || typeof document === "undefined") return false;
-  try {
-    const cmdVal = document.queryCommandValue("foreColor")?.toLowerCase();
-    if (
-      cmdVal === "rgb(20, 24, 33)" ||
-      cmdVal === "rgb(20,24,33)" ||
-      cmdVal === "#141821" ||
-      cmdVal === "141821"
-    ) {
-      return true;
-    }
-  } catch {
-    // Ignore queryCommandValue exceptions
-  }
-
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return false;
-  let node: Node | null = sel.anchorNode;
-  while (node && node !== document.body) {
-    if (node.nodeType === 1 /* Element */) {
-      const el = node as HTMLElement;
-      const colorAttr = el.getAttribute("color")?.toLowerCase();
-      const styleColor = el.style?.color?.toLowerCase();
-      const dataColor = el.getAttribute("data-color")?.toLowerCase();
-      if (
-        colorAttr === HIGHLIGHT_COLOR.toLowerCase() ||
-        colorAttr === "#141821" ||
-        colorAttr?.includes("141821") ||
-        styleColor === "rgb(20, 24, 33)" ||
-        styleColor === "#141821" ||
-        dataColor === HIGHLIGHT_COLOR.toLowerCase() ||
-        el.tagName === "MARK" ||
-        (el.tagName === "FONT" && (colorAttr?.includes("141821") || colorAttr === "#141821"))
-      ) {
-        return true;
-      }
-    }
-    node = node.parentNode;
-  }
-  return false;
+function rgbToHex(rgbStr: string): string | null {
+  const m = rgbStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (!m || !m[1] || !m[2] || !m[3]) return null;
+  const r = parseInt(m[1], 10).toString(16).padStart(2, "0");
+  const g = parseInt(m[2], 10).toString(16).padStart(2, "0");
+  const b = parseInt(m[3], 10).toString(16).padStart(2, "0");
+  return `#${r}${g}${b}`;
 }
 
 export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContentEditorProps>(
@@ -81,17 +56,108 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       italic: false,
       underline: false,
       blackInk: false,
+      hasSelection: false,
     });
 
     const queryActiveFormats = useCallback((): FormatState => {
-      if (typeof document === "undefined") {
-        return { bold: false, italic: false, underline: false, blackInk: false };
+      if (typeof document === "undefined" || !editorRef.current) {
+        return { bold: false, italic: false, underline: false, blackInk: false, hasSelection: false };
       }
       const bold = document.queryCommandState("bold");
       const italic = document.queryCommandState("italic");
       const underline = document.queryCommandState("underline");
-      const blackInk = checkBlackInkActive();
-      return { bold, italic, underline, blackInk };
+
+      const sel = window.getSelection();
+      let hasSelection = false;
+      let selectionRect: { top: number; left: number; width: number; height: number } | undefined = undefined;
+
+      let color: string | undefined = undefined;
+      let scale: number | undefined = undefined;
+      let highlight: string | undefined = undefined;
+      let blackInk = false;
+
+      if (sel && sel.rangeCount > 0) {
+        if (!sel.isCollapsed && editorRef.current.contains(sel.anchorNode)) {
+          const range = sel.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            hasSelection = true;
+            selectionRect = {
+              top: rect.top,
+              left: rect.left,
+              width: rect.width,
+              height: rect.height,
+            };
+          }
+        }
+
+        let node: Node | null = sel.anchorNode;
+        while (node && node !== editorRef.current && node !== document.body) {
+          if (node.nodeType === 1) {
+            const el = node as HTMLElement;
+            // Detect scale
+            if (!scale) {
+              const dataScale = el.getAttribute("data-scale");
+              if (dataScale) {
+                const s = parseFloat(dataScale);
+                if (!isNaN(s)) scale = s;
+              } else if (el.style?.fontSize) {
+                const fs = el.style.fontSize;
+                if (fs.includes("em")) {
+                  const s = parseFloat(fs);
+                  if (!isNaN(s)) scale = s;
+                }
+              }
+            }
+
+            // Detect color
+            if (!color) {
+              const fontColor = el.getAttribute("color");
+              const styleColor = el.style?.color;
+              const rawColor = fontColor || styleColor;
+              if (rawColor && rawColor !== "inherit") {
+                color = rawColor.startsWith("rgb") ? (rgbToHex(rawColor) ?? rawColor) : rawColor;
+              }
+            }
+
+            // Detect highlight
+            if (!highlight) {
+              const dataHigh = el.getAttribute("data-highlight");
+              const bg = el.style?.backgroundColor;
+              if (dataHigh && dataHigh !== "transparent") {
+                highlight = dataHigh;
+              } else if (bg && bg !== "transparent" && bg !== "inherit") {
+                highlight = bg.startsWith("rgb") ? (rgbToHex(bg) ?? bg) : bg;
+              } else if (el.tagName === "MARK") {
+                highlight = "#fef08a";
+              }
+            }
+          }
+          node = node.parentNode;
+        }
+      }
+
+      if (
+        color === HIGHLIGHT_COLOR ||
+        color?.toLowerCase() === "#141821" ||
+        color?.includes("141821") ||
+        color?.includes("20, 24, 33") ||
+        color?.includes("20,24,33")
+      ) {
+        blackInk = true;
+      }
+
+      return {
+        bold,
+        italic,
+        underline,
+        blackInk,
+        color,
+        scale,
+        highlight,
+        hasSelection,
+        selectionRect,
+      };
     }, []);
 
     const updateFormatState = useCallback(() => {
@@ -99,6 +165,19 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       setFormatState(state);
       onFormatChange?.(state);
     }, [queryActiveFormats, onFormatChange]);
+
+    // Selection change tracking
+    useEffect(() => {
+      const handleSelectionChange = () => {
+        if (!editorRef.current) return;
+        const sel = window.getSelection();
+        if (sel && sel.anchorNode && editorRef.current.contains(sel.anchorNode)) {
+          updateFormatState();
+        }
+      };
+      document.addEventListener("selectionchange", handleSelectionChange);
+      return () => document.removeEventListener("selectionchange", handleSelectionChange);
+    }, [updateFormatState]);
 
     const triggerChange = useCallback(() => {
       const el = editorRef.current;
@@ -157,12 +236,102 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       const el = editorRef.current;
       if (!el) return;
       el.focus();
-      const active = checkBlackInkActive();
-      if (active) {
-        document.execCommand("removeFormat", false);
+      if (formatState.blackInk) {
         document.execCommand("foreColor", false, "inherit");
       } else {
         document.execCommand("foreColor", false, HIGHLIGHT_COLOR);
+      }
+      triggerChange();
+    }, [formatState.blackInk, triggerChange]);
+
+    const setFontScale = useCallback(
+      (scale: number | null) => {
+        const el = editorRef.current;
+        if (!el) return;
+        el.focus();
+
+        if (!scale || scale === 1.0) {
+          document.execCommand("fontSize", false, "3");
+          const fonts = el.querySelectorAll('font[size="3"]');
+          fonts.forEach((f) => {
+            const span = document.createElement("span");
+            span.innerHTML = f.innerHTML;
+            f.replaceWith(span);
+          });
+        } else {
+          document.execCommand("fontSize", false, "7");
+          const fonts = el.querySelectorAll('font[size="7"]');
+          fonts.forEach((f) => {
+            const span = document.createElement("span");
+            span.setAttribute("data-scale", String(scale));
+            span.style.fontSize = `${scale}em`;
+            span.innerHTML = f.innerHTML;
+            f.replaceWith(span);
+          });
+        }
+        triggerChange();
+      },
+      [triggerChange],
+    );
+
+    const setTextColor = useCallback(
+      (color: string | null) => {
+        const el = editorRef.current;
+        if (!el) return;
+        el.focus();
+        if (!color || color === "inherit") {
+          document.execCommand("foreColor", false, "inherit");
+        } else {
+          document.execCommand("foreColor", false, color);
+        }
+        triggerChange();
+      },
+      [triggerChange],
+    );
+
+    const setHighlight = useCallback(
+      (color: string | null) => {
+        const el = editorRef.current;
+        if (!el) return;
+        el.focus();
+        if (!color || color === "transparent") {
+          document.execCommand("hiliteColor", false, "transparent");
+          document.execCommand("backColor", false, "transparent");
+        } else {
+          const success = document.execCommand("hiliteColor", false, color);
+          if (!success) {
+            document.execCommand("backColor", false, color);
+          }
+        }
+        triggerChange();
+      },
+      [triggerChange],
+    );
+
+    const clearFormatting = useCallback(() => {
+      const el = editorRef.current;
+      if (!el) return;
+      el.focus();
+      document.execCommand("removeFormat", false);
+      document.execCommand("foreColor", false, "inherit");
+      document.execCommand("hiliteColor", false, "transparent");
+      document.execCommand("backColor", false, "transparent");
+
+      // Clean up any residual data-scale wrappers in active selection
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        let node: Node | null = sel.anchorNode;
+        while (node && node !== el) {
+          if (node.nodeType === 1) {
+            const elem = node as HTMLElement;
+            if (elem.hasAttribute("data-scale") || elem.hasAttribute("data-highlight") || elem.tagName === "MARK") {
+              const text = elem.innerText;
+              elem.replaceWith(document.createTextNode(text));
+              break;
+            }
+          }
+          node = node.parentNode;
+        }
       }
       triggerChange();
     }, [triggerChange]);
@@ -209,11 +378,26 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         toggleItalic,
         toggleUnderline,
         toggleBlackInk,
+        setFontScale,
+        setTextColor,
+        setHighlight,
+        clearFormatting,
         insertTable,
         focus: () => editorRef.current?.focus(),
         getFormatState: () => formatState,
       }),
-      [toggleBold, toggleItalic, toggleUnderline, toggleBlackInk, insertTable, formatState],
+      [
+        toggleBold,
+        toggleItalic,
+        toggleUnderline,
+        toggleBlackInk,
+        setFontScale,
+        setTextColor,
+        setHighlight,
+        clearFormatting,
+        insertTable,
+        formatState,
+      ],
     );
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -265,7 +449,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         onMouseUp={updateFormatState}
         onFocus={updateFormatState}
         className={cn(
-          "min-h-[40vh] lg:min-h-[52vh] rounded-lg border border-input bg-card p-4 text-base leading-relaxed text-foreground outline-none transition-colors",
+          "min-h-0 flex-1 rounded-lg border border-input bg-card p-4 text-base leading-relaxed text-foreground outline-none transition-colors",
           "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
           "overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]",
           "[&_h1]:mb-3 [&_h1]:mt-4 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:tracking-tight",

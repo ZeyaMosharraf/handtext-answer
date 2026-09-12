@@ -1,8 +1,11 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Bold,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Cloud,
   CloudOff,
   Highlighter,
@@ -22,6 +25,8 @@ import { toast } from "sonner";
 
 import { AiAssistant } from "@/components/editor/AiAssistant";
 import { DesignPanel } from "@/components/editor/DesignPanel";
+import { EditorToolbar } from "@/components/editor/EditorToolbar";
+import { FloatingFormatBubble } from "@/components/editor/FloatingFormatBubble";
 import { ResultView } from "@/components/editor/ResultView";
 import { RichContentEditor, type FormatState, type RichContentEditorHandle } from "@/components/editor/RichContentEditor";
 import { Button, Card, Input, Spinner, Textarea } from "@/components/ui/primitives";
@@ -43,11 +48,13 @@ import {
 import { htmlToPlainText, migrateLegacyContentToHtml, plainTextToHtml } from "@/lib/handwriting/parse";
 import { getLocalDraft, markLocalDraftSynced, saveLocalDraft } from "@/lib/local-drafts";
 import {
+  getUserUsage,
   isProjectSnapshotEqual,
   recordUsage,
   updateProject,
   type Project,
   type ProjectSnapshot,
+  type UserUsageInfo,
 } from "@/lib/projects";
 import { loadTemplates, persistTemplates, type SavedTemplate } from "@/lib/templates";
 import { cn } from "@/lib/utils";
@@ -75,6 +82,12 @@ interface Draft {
 }
 
 export function EditorWorkspace({ project }: { project: Project }) {
+  const queryClient = useQueryClient();
+  const { data: usageInfo } = useQuery({
+    queryKey: ["usage", project.user_id],
+    queryFn: getUserUsage,
+  });
+
   const [name, setName] = useState(project.name);
   const [draft, setDraft] = useState<Draft>(() => ({
     question: project.question,
@@ -91,6 +104,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
     italic: false,
     underline: false,
     blackInk: false,
+    hasSelection: false,
   });
 
   const past = useRef<Draft[]>([]);
@@ -167,6 +181,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
   const isCloudSavingRef = useRef(false);
   const pendingCloudSaveRef = useRef(false);
   const isMountedRef = useRef(false);
+  const isRestorationCompleteRef = useRef(false);
 
   // Check and restore local draft from IndexedDB on initial load
   useEffect(() => {
@@ -197,6 +212,10 @@ export function EditorWorkspace({ project }: { project: Project }) {
         }
       } catch (err) {
         console.error("Failed to restore local draft from IndexedDB:", err);
+      } finally {
+        if (!isCancelled) {
+          isRestorationCompleteRef.current = true;
+        }
       }
     }
 
@@ -269,16 +288,18 @@ export function EditorWorkspace({ project }: { project: Project }) {
     setSaveState("saving-cloud");
 
     try {
-      await updateProject(project.id, {
+      const updated = await updateProject(project.id, {
         name: snapshotToPersist.name.trim() || "Untitled answer",
         question: snapshotToPersist.assignmentMode ? snapshotToPersist.question : "",
         content: snapshotToPersist.content,
         settings: snapshotToPersist.settings,
       });
 
+      queryClient.setQueryData(["project", project.id], updated);
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+
       lastCloudSavedSnapshotRef.current = snapshotToPersist;
-      const nowIso = new Date().toISOString();
-      await markLocalDraftSynced(project.user_id, project.id, nowIso);
+      await markLocalDraftSynced(project.user_id, project.id, updated.updated_at);
       setSaveState("saved");
       toast.success("Saved");
       return true;
@@ -294,7 +315,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
         void performCloudSave();
       }
     }
-  }, [project.id, project.user_id, project.updated_at]);
+  }, [project.id, project.user_id, project.updated_at, queryClient]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -325,17 +346,22 @@ export function EditorWorkspace({ project }: { project: Project }) {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [isDirtyCloud]);
 
-  // Flush latest draft to IndexedDB on unmount
+  // Flush latest draft to IndexedDB on unmount only if restoration was complete and has unsaved local changes
   useEffect(() => {
     return () => {
       if (autosaveTimerRef.current) {
         clearTimeout(autosaveTimerRef.current);
       }
+      if (!isRestorationCompleteRef.current) {
+        return;
+      }
       const snap = currentDraftRef.current;
-      void saveLocalDraft(project.user_id, project.id, snap, {
-        isSynced: isProjectSnapshotEqual(snap, lastCloudSavedSnapshotRef.current),
-        cloudUpdatedAt: project.updated_at,
-      }).catch(() => undefined);
+      if (!isProjectSnapshotEqual(snap, lastLocalSavedSnapshotRef.current)) {
+        void saveLocalDraft(project.user_id, project.id, snap, {
+          isSynced: isProjectSnapshotEqual(snap, lastCloudSavedSnapshotRef.current),
+          cloudUpdatedAt: project.updated_at,
+        }).catch(() => undefined);
+      }
     };
   }, [project.id, project.user_id, project.updated_at]);
 
@@ -354,6 +380,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
   const renderTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [renderedInitial, setRenderedInitial] = useState(false);
   const [previewPages, setPreviewPages] = useState(0);
+  const [previewPageIndex, setPreviewPageIndex] = useState(0);
   const [previewing, setPreviewing] = useState(false);
 
   const [generating, setGenerating] = useState(false);
@@ -430,16 +457,19 @@ export function EditorWorkspace({ project }: { project: Project }) {
         settings: previewInput.settings,
       },
       canvas,
-      0,
+      previewPageIndex,
     )
       .then((res) => {
         setPreviewPages(res.totalPages);
+        if (previewPageIndex >= res.totalPages && res.totalPages > 0) {
+          setPreviewPageIndex(res.totalPages - 1);
+        }
         activeCoordinatesRef.current = res.coordinates;
         setRenderedInitial(true);
       })
       .catch(() => undefined)
       .finally(() => setPreviewing(false));
-  }, [previewInput]);
+  }, [previewInput, previewPageIndex]);
 
   const scheduleRender = useCallback(
     (immediate = false) => {
@@ -514,26 +544,29 @@ export function EditorWorkspace({ project }: { project: Project }) {
       setProgress(100);
       setStage("Your handwritten answer is ready.");
       setPages(result);
-      await updateProject(project.id, { page_count: result.length, status: "generated" });
+      const updated = await updateProject(project.id, { page_count: result.length, status: "generated" });
+      queryClient.setQueryData(["project", project.id], updated);
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
       await recordUsage(result.length);
+      queryClient.invalidateQueries({ queryKey: ["usage"] });
     } catch (error) {
       console.error(error);
       toast.error("We couldn't generate your pages right now. Your answer is safe — please try again.");
     } finally {
       setTimeout(() => setGenerating(false), 350);
     }
-  }, [content, question, assignmentMode, settings, project.id, project.user_id, project.updated_at]);
+  }, [content, question, assignmentMode, settings, project.id, project.user_id, project.updated_at, queryClient]);
 
   if (pages) {
-    return <ResultView pages={pages} projectName={name} onBack={() => setPages(null)} />;
+    return <ResultView pages={pages} projectName={name} onBack={() => setPages(null)} usageInfo={usageInfo} />;
   }
 
   const words = wordCount(content);
   void historyTick;
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-30 border-b border-border bg-background/90 px-4 py-3 backdrop-blur">
+    <div className="flex h-screen flex-col overflow-hidden">
+      <header className="sticky top-0 z-30 shrink-0 border-b border-border bg-background/90 px-4 py-2.5 backdrop-blur">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3">
           <h1 className="sr-only">{name?.trim() || "Untitled project"} — handwriting editor</h1>
           <Link to="/dashboard" aria-label="Back to dashboard">
@@ -587,6 +620,9 @@ export function EditorWorkspace({ project }: { project: Project }) {
             </Button>
             <span className="hidden text-xs text-muted-foreground sm:block">
               {words} words · {Math.max(previewPages, 1)} page{previewPages > 1 ? "s" : ""}
+              {usageInfo && usageInfo.monthlyPageLimit !== null && (
+                <> · {usageInfo.pagesRemaining} left</>
+              )}
             </span>
             <Button
               variant="secondary"
@@ -612,7 +648,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
       </header>
 
       {/* mobile tabs */}
-      <div className="flex gap-1 border-b border-border bg-card px-4 py-2 lg:hidden" role="tablist">
+      <div className="flex shrink-0 gap-1 border-b border-border bg-card px-4 py-2 lg:hidden" role="tablist">
         {(["content", "preview", "design"] as Tab[]).map((t) => (
           <button
             key={t}
@@ -629,12 +665,15 @@ export function EditorWorkspace({ project }: { project: Project }) {
         ))}
       </div>
 
-      <div className="mx-auto grid w-full max-w-[1600px] flex-1 gap-6 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,520px)_400px]">
+      <div className="mx-auto grid w-full max-w-[1600px] flex-1 min-h-0 gap-6 p-4 overflow-hidden lg:grid-cols-[minmax(0,1fr)_520px_380px]">
         {/* Content */}
-        <section className={cn("space-y-3", tab !== "content" && "hidden lg:block")} aria-label="Answer content">
-          <div className="flex items-center justify-between">
+        <section
+          className={cn("flex flex-col h-full min-h-0 space-y-2.5", tab !== "content" && "hidden lg:flex")}
+          aria-label="Answer content"
+        >
+          <div className="flex shrink-0 items-center justify-between">
             <h2 className="text-sm font-semibold">Content</h2>
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
               <input
                 type="checkbox"
                 className="size-4 accent-primary"
@@ -646,116 +685,50 @@ export function EditorWorkspace({ project }: { project: Project }) {
           </div>
 
           {assignmentMode && (
-            <Textarea
-              value={question}
-              onChange={(e) => commit((p) => ({ ...p, question: e.target.value }))}
-              aria-label="Question"
-              placeholder="Q1. Explain the OSI model and its seven layers."
-              className="min-h-20"
-            />
+            <div className="shrink-0">
+              <Textarea
+                value={question}
+                onChange={(e) => commit((p) => ({ ...p, question: e.target.value }))}
+                aria-label="Question"
+                placeholder="Q1. Explain the OSI model and its seven layers."
+                className="min-h-16 max-h-24 resize-y text-sm"
+              />
+            </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card p-1.5 shadow-sm">
-            <Button
-              type="button"
-              variant={formatState.bold ? "primary" : "secondary"}
-              size="sm"
-              onClick={() => richEditorRef.current?.toggleBold()}
-              title="Bold (Ctrl+B)"
-              className="h-8 gap-1.5 px-2.5 text-xs font-medium transition-all"
-            >
-              <Bold className="size-3.5" />
-              <span>Bold</span>
-            </Button>
-            <Button
-              type="button"
-              variant={formatState.italic ? "primary" : "secondary"}
-              size="sm"
-              onClick={() => richEditorRef.current?.toggleItalic()}
-              title="Italic (Ctrl+I)"
-              className="h-8 gap-1.5 px-2.5 text-xs font-medium transition-all"
-            >
-              <Italic className="size-3.5" />
-              <span>Italic</span>
-            </Button>
-            <Button
-              type="button"
-              variant={formatState.underline ? "primary" : "secondary"}
-              size="sm"
-              onClick={() => richEditorRef.current?.toggleUnderline()}
-              title="Underline (Ctrl+U)"
-              className="h-8 gap-1.5 px-2.5 text-xs font-medium transition-all"
-            >
-              <Underline className="size-3.5" />
-              <span>Underline</span>
-            </Button>
-            <Button
-              type="button"
-              variant={formatState.blackInk ? "primary" : "secondary"}
-              size="sm"
-              onClick={() => richEditorRef.current?.toggleBlackInk()}
-              title="Black ink emphasis"
-              className="h-8 gap-1.5 px-2.5 text-xs font-medium transition-all"
-            >
-              <Highlighter className="size-3.5" />
-              <span>Black ink</span>
-            </Button>
+          <div className="shrink-0">
+            <EditorToolbar
+              editorRef={richEditorRef}
+              formatState={formatState}
+            />
           </div>
 
-          <RichContentEditor
-            ref={richEditorRef}
-            value={content}
-            onChange={(html) => commit((p) => ({ ...p, content: html }))}
-            onFormatChange={setFormatState}
-            placeholder="Write or paste your answer here..."
-          />
+          <div className="relative flex-1 min-h-0 flex flex-col">
+            <RichContentEditor
+              ref={richEditorRef}
+              value={content}
+              onChange={(html) => commit((p) => ({ ...p, content: html }))}
+              onFormatChange={setFormatState}
+              placeholder="Write or paste your answer here..."
+              className="flex-1 min-h-0 h-full overflow-y-auto"
+            />
+            <FloatingFormatBubble
+              editorRef={richEditorRef}
+              formatState={formatState}
+            />
+          </div>
 
-          <Card className="flex flex-wrap items-end gap-2 p-3">
-            <div className="space-y-1">
-              <label htmlFor="rows" className="block text-xs text-muted-foreground">
-                Rows
-              </label>
-              <Input
-                id="rows"
-                type="number"
-                min={1}
-                max={20}
-                value={tableRows}
-                onChange={(e) => setTableRows(Number(e.target.value))}
-                className="w-20"
-              />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="cols" className="block text-xs text-muted-foreground">
-                Columns
-              </label>
-              <Input
-                id="cols"
-                type="number"
-                min={1}
-                max={8}
-                value={tableCols}
-                onChange={(e) => setTableCols(Number(e.target.value))}
-                className="w-20"
-              />
-            </div>
-            <Button variant="secondary" onClick={insertTable}>
-              <Table2 className="size-4" />
-              Add table
-            </Button>
-          </Card>
-
-          <p className="text-xs text-muted-foreground">
-            Rich-text formatting: <code>Ctrl+B</code> for bold, <code>Ctrl+I</code> for italic, <code>Ctrl+U</code> for underline.
-            Click toolbar buttons or use keyboard shortcuts to format text cleanly without markup markers.
-          </p>
-
-          <AiAssistant answer={content} onUse={(text) => commit((p) => ({ ...p, content: text }))} />
+          <div className="shrink-0">
+            <AiAssistant answer={content} onUse={(text) => commit((p) => ({ ...p, content: text }))} />
+          </div>
         </section>
 
         {/* Preview */}
-        <section className={cn("space-y-3", tab !== "preview" && "hidden lg:block")} aria-label="Live page preview">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+        <section
+          className={cn("flex flex-col h-full min-h-0 space-y-2.5", tab !== "preview" && "hidden lg:flex")}
+          aria-label="Live page preview"
+        >
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold">Page preview</h2>
             <div className="flex items-center gap-2">
               <Button
@@ -767,12 +740,40 @@ export function EditorWorkspace({ project }: { project: Project }) {
                 <PenLine className="size-4" />
                 {writeOnPage ? "Writing on page" : "Write on page"}
               </Button>
+              {previewPages > 1 && (
+                <div className="flex items-center gap-0.5">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7"
+                    aria-label="Previous preview page"
+                    disabled={previewPageIndex === 0}
+                    onClick={() => {
+                      setPreviewPageIndex((i) => Math.max(0, i - 1));
+                    }}
+                  >
+                    <ChevronLeft className="size-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7"
+                    aria-label="Next preview page"
+                    disabled={previewPageIndex >= previewPages - 1}
+                    onClick={() => {
+                      setPreviewPageIndex((i) => Math.min(previewPages - 1, i + 1));
+                    }}
+                  >
+                    <ChevronRight className="size-3.5" />
+                  </Button>
+                </div>
+              )}
               <span className="text-xs text-muted-foreground">
-                {previewing ? "Updating…" : `Page 1 of ${Math.max(previewPages, 1)}`}
+                {previewing ? "Updating…" : `Page ${previewPageIndex + 1} of ${Math.max(previewPages, 1)}`}
               </span>
             </div>
           </div>
-          <Card className="overflow-hidden p-2 lg:sticky lg:top-24">
+          <Card className="flex-1 min-h-0 overflow-y-auto p-2 flex items-start justify-center">
             <div
               ref={pageBoxRef}
               onPointerMove={(e) => {
@@ -791,11 +792,11 @@ export function EditorWorkspace({ project }: { project: Project }) {
               onClick={() => {
                 if (writeOnPage) onPageRef.current?.focus();
               }}
-              className="relative select-none"
+              className="relative select-none w-full max-w-[500px]"
             >
               <canvas
                 ref={previewCanvasRef}
-                className={cn("block w-full rounded transition-opacity", previewing && "opacity-90")}
+                className={cn("block w-full rounded transition-opacity shadow-xs", previewing && "opacity-90")}
                 style={{ display: renderedInitial ? "block" : "none" }}
               />
               {!renderedInitial && (
@@ -857,17 +858,19 @@ export function EditorWorkspace({ project }: { project: Project }) {
             </div>
           </Card>
           {writeOnPage && (
-            <p className="text-xs text-muted-foreground">
-              Type straight on the sheet — your handwriting appears as you pause. Use the Bold, Italic, Underline and Black ink
-              buttons on the left for emphasis.
+            <p className="shrink-0 text-xs text-muted-foreground">
+              Type straight on the sheet — your handwriting appears as you pause.
             </p>
           )}
         </section>
 
         {/* Design */}
-        <aside className={cn("space-y-3", tab !== "design" && "hidden lg:block")} aria-label="Page and handwriting design">
-          <h2 className="text-sm font-semibold">Design</h2>
-          <div className="lg:max-h-[calc(100vh-9rem)] lg:overflow-y-auto lg:pr-2">
+        <aside
+          className={cn("flex flex-col h-full min-h-0 space-y-2.5", tab !== "design" && "hidden lg:flex")}
+          aria-label="Page and handwriting design"
+        >
+          <h2 className="shrink-0 text-sm font-semibold">Design</h2>
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
             <DesignPanel
               settings={settings}
               onChange={(next) => commit((p) => ({ ...p, settings: next }))}

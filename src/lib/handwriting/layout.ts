@@ -162,7 +162,10 @@ function textWidth(ctx: CanvasRenderingContext2D, text: string, settings: Handwr
 }
 
 function segmentsWidth(ctx: CanvasRenderingContext2D, segs: Seg[], settings: HandwritingSettings, scale: number) {
-  return segs.reduce((width, seg) => width + textWidth(ctx, seg.text, settings, scale), 0);
+  return segs.reduce((width, seg) => {
+    const effectiveScale = scale * (seg.scale ?? 1.0);
+    return width + textWidth(ctx, seg.text, settings, effectiveScale);
+  }, 0);
 }
 
 function plainSegments(text: string): Seg[] {
@@ -178,8 +181,8 @@ function wrapSegments(
 ) {
   const tokens: Seg[] = [];
   for (const seg of segs) {
-    for (const part of seg.text.split(/(\s+)/)) {
-      if (part) tokens.push({ ...seg, text: /^\s+$/.test(part) ? " " : part });
+    for (const part of seg.text.split(/([ \t]+)/)) {
+      if (part) tokens.push({ ...seg, text: /^[ \t]+$/.test(part) ? " " : part });
     }
   }
 
@@ -342,18 +345,68 @@ function blockLines(
   const markerWidth = block.marker ? textWidth(ctx, `${block.marker} `, settings, scale) : 0;
   const explicitIndent = block.kind === "quote" ? settings.fontSize * 0.9 : 0;
   const availableWidth = Math.max(1, contentWidth - explicitIndent - markerWidth);
-  const wrapped = wrapSegments(ctx, block.segs ?? plainSegments(block.text), settings, scale, availableWidth);
+  const rawSegs = block.segs ?? plainSegments(block.text);
 
-  return wrapped.map((segs, index) => ({
-    type: "line",
-    segs,
-    kind: block.kind,
-    ...(index === 0 && block.marker ? { marker: block.marker } : {}),
-    indent: explicitIndent + (index > 0 ? markerWidth : 0),
-    scale,
-    underline: block.kind === "heading",
-    gapLines: 0,
-  }));
+  // Split rawSegs by newline '\n' into distinct logical lines
+  const logicalLines: Seg[][] = [];
+  let currentLineSegs: Seg[] = [];
+
+  for (const seg of rawSegs) {
+    if (!seg.text.includes("\n")) {
+      currentLineSegs.push(seg);
+      continue;
+    }
+    const parts = seg.text.split("\n");
+    for (let pIdx = 0; pIdx < parts.length; pIdx++) {
+      if (pIdx > 0) {
+        logicalLines.push(currentLineSegs);
+        currentLineSegs = [];
+      }
+      const part = parts[pIdx];
+      if (part) {
+        currentLineSegs.push({ ...seg, text: part });
+      }
+    }
+  }
+  if (currentLineSegs.length > 0 || logicalLines.length === 0) {
+    logicalLines.push(currentLineSegs);
+  }
+
+  const resultLines: FlowLine[] = [];
+
+  logicalLines.forEach((lineSegs, logicalLineIdx) => {
+    const wrapped = wrapSegments(ctx, lineSegs, settings, scale, availableWidth);
+    if (wrapped.length === 0) {
+      if (logicalLineIdx > 0) {
+        resultLines.push({
+          type: "line",
+          segs: plainSegments(""),
+          kind: block.kind,
+          indent: explicitIndent + (logicalLineIdx > 0 ? markerWidth : 0),
+          scale,
+          underline: false,
+          gapLines: 0,
+        });
+      }
+      return;
+    }
+
+    wrapped.forEach((segs, wrapIdx) => {
+      const isFirstOfBlock = logicalLineIdx === 0 && wrapIdx === 0;
+      resultLines.push({
+        type: "line",
+        segs,
+        kind: block.kind,
+        ...(isFirstOfBlock && block.marker ? { marker: block.marker } : {}),
+        indent: explicitIndent + (!isFirstOfBlock && block.marker ? markerWidth : 0),
+        scale,
+        underline: block.kind === "heading",
+        gapLines: 0,
+      });
+    });
+  });
+
+  return resultLines;
 }
 
 function tableRows(
