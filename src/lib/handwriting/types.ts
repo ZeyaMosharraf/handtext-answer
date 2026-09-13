@@ -38,6 +38,44 @@ export type ElementKind =
 
 export type PageNumberFormat = "n" | "page-n" | "page-dash-n" | "pg-n" | "n-of-t" | "page-n-of-t";
 
+export type ElementTextSize = "small" | "normal" | "large" | "extra-large";
+
+export interface TextSizePreset {
+  id: ElementTextSize;
+  label: string;
+  fontSize: number;
+}
+
+export const TEXT_SIZE_PRESETS: readonly TextSizePreset[] = [
+  { id: "small", label: "Small", fontSize: 16 },
+  { id: "normal", label: "Normal", fontSize: 20 },
+  { id: "large", label: "Large", fontSize: 24 },
+  { id: "extra-large", label: "Extra Large", fontSize: 28 },
+] as const;
+
+export function fontSizeForTextSize(size?: ElementTextSize): number {
+  switch (size) {
+    case "small":
+      return 16;
+    case "large":
+      return 24;
+    case "extra-large":
+      return 28;
+    case "normal":
+    default:
+      return 20;
+  }
+}
+
+export function getTextSizePreset(fontSize?: number, textSize?: ElementTextSize): ElementTextSize {
+  if (textSize) return textSize;
+  if (!fontSize) return "normal";
+  if (fontSize <= 17) return "small";
+  if (fontSize <= 21) return "normal";
+  if (fontSize <= 25) return "large";
+  return "extra-large";
+}
+
 export interface PageElement {
   id: string;
   kind: ElementKind;
@@ -46,6 +84,7 @@ export interface PageElement {
   slot: Slot;
   row: number; // 0-based row inside the header/footer band
   fontSize: number;
+  textSize?: ElementTextSize;
   color: string;
   handwritten: boolean;
   enabled: boolean;
@@ -70,6 +109,7 @@ export interface ElementOverride {
   slot?: Slot | undefined;
   row?: number | undefined;
   fontSize?: number | undefined;
+  textSize?: ElementTextSize | undefined;
   color?: string | undefined;
   handwritten?: boolean | undefined;
   enabled?: boolean | undefined;
@@ -321,6 +361,7 @@ export function newElement(kind: ElementKind, partial: Partial<PageElement> = {}
     slot: def.slot,
     row: def.row,
     fontSize: 20,
+    textSize: "normal",
     color: "#333333",
     handwritten: false,
     enabled: true,
@@ -450,7 +491,13 @@ export function resolveEffectiveBand(
       if (override.label !== undefined) patched.label = override.label;
       if (override.slot !== undefined) patched.slot = override.slot;
       if (override.row !== undefined) patched.row = override.row;
-      if (override.fontSize !== undefined) patched.fontSize = override.fontSize;
+      if (override.textSize !== undefined) {
+        patched.textSize = override.textSize;
+        patched.fontSize = fontSizeForTextSize(override.textSize);
+      } else if (override.fontSize !== undefined) {
+        patched.fontSize = override.fontSize;
+        patched.textSize = getTextSizePreset(override.fontSize);
+      }
       if (override.color !== undefined) patched.color = override.color;
       if (override.handwritten !== undefined) patched.handwritten = override.handwritten;
       if (override.enabled !== undefined) patched.enabled = override.enabled;

@@ -17,10 +17,13 @@ import {
   PAPERS,
   PAPER_COLORS,
   RULING_COLORS,
+  TEXT_SIZE_PRESETS,
   STANDARD_FOOTER_HEIGHT,
   STANDARD_HEADER_HEIGHT,
   applyTemplate,
   cleanupPageOverrides,
+  fontSizeForTextSize,
+  getTextSizePreset,
   newElement,
   resolveEffectiveBand,
   styleSettings,
@@ -29,6 +32,7 @@ import {
   type BandOverride,
   type ElementKind,
   type ElementOverride,
+  type ElementTextSize,
   type HandwritingSettings,
   type InkColor,
   type Orientation,
@@ -716,6 +720,7 @@ function HeaderEditor({
       slot,
       row,
       fontSize: 20,
+      textSize: "normal",
       color: "#333333",
       handwritten: false,
       enabled: true,
@@ -873,7 +878,10 @@ function HeaderEditor({
         const nextElemOverride: ElementOverride = { ...currentElemOverride, ...patch };
 
         for (const key of Object.keys(nextElemOverride) as (keyof ElementOverride)[]) {
-          if (nextElemOverride[key] === (globalEl as any)[key]) {
+          const globalVal =
+            (globalEl as any)[key] ??
+            (key === "textSize" ? "normal" : key === "fontSize" ? 20 : undefined);
+          if (nextElemOverride[key] === globalVal) {
             delete nextElemOverride[key];
           }
         }
@@ -1163,6 +1171,38 @@ function HeaderEditor({
                       </div>
                     )}
 
+                    {/* Text size */}
+                    <div className="space-y-1">
+                      <label htmlFor={`field-text-size-${el.id}`} className="text-[11px] text-muted-foreground">
+                        Text size
+                      </label>
+                      <Select
+                        id={`field-text-size-${el.id}`}
+                        aria-label="Text size"
+                        value={el.textSize ?? getTextSizePreset(el.fontSize)}
+                        onChange={(e) => {
+                          const nextSize = e.target.value as ElementTextSize;
+                          if (scope === "all") {
+                            handleUpdateElement(el.id, {
+                              textSize: nextSize,
+                              fontSize: fontSizeForTextSize(nextSize),
+                            });
+                          } else {
+                            handleUpdateElement(el.id, {
+                              textSize: nextSize,
+                            });
+                          }
+                        }}
+                        className="text-xs h-8"
+                      >
+                        {TEXT_SIZE_PRESETS.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+
                     {/* Handwritten toggle */}
                     <div className="pt-0.5">
                       <label className="inline-flex items-center gap-2 text-xs font-medium cursor-pointer select-none text-foreground">
@@ -1372,7 +1412,8 @@ function FooterEditor({
     const newEl = newElement(selectedKind, {
       slot,
       row,
-      fontSize: 18,
+      fontSize: 20,
+      textSize: "normal",
       color: "#333333",
       handwritten: false,
       enabled: true,
@@ -1531,7 +1572,10 @@ function FooterEditor({
         const nextElemOverride: ElementOverride = { ...currentElemOverride, ...patch };
 
         for (const key of Object.keys(nextElemOverride) as (keyof ElementOverride)[]) {
-          if (nextElemOverride[key] === (globalEl as any)[key]) {
+          const globalVal =
+            (globalEl as any)[key] ??
+            (key === "textSize" ? "normal" : key === "fontSize" ? 20 : undefined);
+          if (nextElemOverride[key] === globalVal) {
             delete nextElemOverride[key];
           }
         }
@@ -1820,6 +1864,38 @@ function FooterEditor({
                         />
                       </div>
                     )}
+
+                    {/* Text size */}
+                    <div className="space-y-1">
+                      <label htmlFor={`footer-field-text-size-${el.id}`} className="text-[11px] text-muted-foreground">
+                        Text size
+                      </label>
+                      <Select
+                        id={`footer-field-text-size-${el.id}`}
+                        aria-label="Text size"
+                        value={el.textSize ?? getTextSizePreset(el.fontSize)}
+                        onChange={(e) => {
+                          const nextSize = e.target.value as ElementTextSize;
+                          if (scope === "all") {
+                            handleUpdateElement(el.id, {
+                              textSize: nextSize,
+                              fontSize: fontSizeForTextSize(nextSize),
+                            });
+                          } else {
+                            handleUpdateElement(el.id, {
+                              textSize: nextSize,
+                            });
+                          }
+                        }}
+                        className="text-xs h-8"
+                      >
+                        {TEXT_SIZE_PRESETS.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
 
                     {/* Handwritten toggle */}
                     <div className="pt-0.5">

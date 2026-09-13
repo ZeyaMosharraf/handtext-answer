@@ -13,7 +13,15 @@ import {
   type LayoutTableBounds,
   type PageCoordinateSystem,
 } from "./layout";
-import { formatPageNumber, inkHex, resolveEffectiveBand, type BandConfig, type HandwritingSettings, type RulingType } from "./types";
+import {
+  fontSizeForTextSize,
+  formatPageNumber,
+  inkHex,
+  resolveEffectiveBand,
+  type BandConfig,
+  type HandwritingSettings,
+  type RulingType,
+} from "./types";
 
 function makeRng(seed: number) {
   let state = seed >>> 0 || 1;
@@ -492,6 +500,7 @@ function drawBand(
       ctx.restore();
 
       rightElements.forEach((element, index) => {
+        const effectiveFontSize = element.textSize ? fontSizeForTextSize(element.textSize) : (element.fontSize || 20);
         const rowY = boxTop + index * boxRowHeight;
         const baselineY = rowY + Math.round(boxRowHeight * 0.7);
         const text = bandElementText(element, pageNumber, totalPages);
@@ -510,34 +519,38 @@ function drawBand(
             element.kind === "pageNumber"
               ? formatPageNumber(element.format, displayPageNumber, totalPages)
               : element.value.trim();
+          const boxFontScale = effectiveFontSize / 20;
+          const boxFontSize = Math.round(13 * boxFontScale);
           if (label && value) {
             ctx.save();
-            ctx.font = '13px "Plus Jakarta Sans", ui-sans-serif, sans-serif';
+            ctx.font = `${boxFontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
             ctx.fillStyle = withAlpha("#333333", 0.75);
             ctx.textBaseline = "alphabetic";
             ctx.fillText(`${label}:`, boxLeft + 8, baselineY);
             const labelW = ctx.measureText(`${label}: `).width;
             ctx.restore();
             writeText(ctx, value, settings, boxLeft + 8 + labelW, baselineY, random, {
-              size: element.fontSize * 1.05,
+              size: effectiveFontSize * 1.05,
               color: penColor,
             });
           } else if (label) {
             ctx.save();
-            ctx.font = '13px "Plus Jakarta Sans", ui-sans-serif, sans-serif';
+            ctx.font = `${boxFontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
             ctx.fillStyle = withAlpha("#333333", 0.75);
             ctx.textBaseline = "alphabetic";
             ctx.fillText(`${label}:`, boxLeft + 8, baselineY);
             ctx.restore();
           } else {
             writeText(ctx, text, settings, boxLeft + 8, baselineY, random, {
-              size: element.fontSize * 1.05,
+              size: effectiveFontSize * 1.05,
               color: penColor,
             });
           }
         } else {
           ctx.save();
-          ctx.font = '13px "Plus Jakarta Sans", ui-sans-serif, sans-serif';
+          const boxFontScale = effectiveFontSize / 20;
+          const boxFontSize = Math.round(13 * boxFontScale);
+          ctx.font = `${boxFontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
           ctx.fillStyle = "#333333";
           ctx.textBaseline = "alphabetic";
           ctx.fillText(text, boxLeft + 8, baselineY);
@@ -547,23 +560,24 @@ function drawBand(
 
       // Left and center aligned elements in header alongside the box
       otherElements.forEach((element, idx) => {
+        const effectiveFontSize = element.textSize ? fontSizeForTextSize(element.textSize) : (element.fontSize || 20);
         const text = bandElementText(element, pageNumber, totalPages);
         const slotIndex = otherElements.slice(0, idx).filter((prev) => prev.slot === element.slot).length;
         const hasRowCollision = otherElements.slice(0, idx).some(
           (prev) => (typeof prev.row === "number" ? prev.row : 0) === element.row && prev.slot === element.slot,
         );
         const effectiveRow = typeof element.row === "number" && !hasRowCollision ? element.row : slotIndex;
-        const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * BAND_ROW_HEIGHT + element.fontSize * 0.6;
-        const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
+        const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * BAND_ROW_HEIGHT + effectiveFontSize * 0.6;
+        const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + effectiveFontSize, requestedBaseline));
         if (element.handwritten) {
           const penColor = element.color && element.color !== "#333333" ? element.color : inkHex(settings);
-          const size = element.fontSize * 1.2;
+          const size = effectiveFontSize * 1.2;
           const width = measureHandwritten(ctx, text, settings, size);
           const x = element.slot === "left" ? left : coordinates.pageWidth / 2 - width / 2;
           writeText(ctx, text, settings, x, baselineY, random, { size, color: penColor });
         } else {
           ctx.save();
-          ctx.font = `${element.fontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
+          ctx.font = `${effectiveFontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
           ctx.fillStyle = "#333333";
           ctx.textBaseline = "alphabetic";
           ctx.textAlign = element.slot === "left" ? "left" : "center";
@@ -574,24 +588,25 @@ function drawBand(
     } else {
       // Standard header elements without metadata box: all slots (left, center, right)
       visible.forEach((element, idx) => {
+        const effectiveFontSize = element.textSize ? fontSizeForTextSize(element.textSize) : (element.fontSize || 20);
         const text = bandElementText(element, pageNumber, totalPages);
         const slotIndex = visible.slice(0, idx).filter((prev) => prev.slot === element.slot).length;
         const hasRowCollision = visible.slice(0, idx).some(
           (prev) => (typeof prev.row === "number" ? prev.row : 0) === element.row && prev.slot === element.slot,
         );
         const effectiveRow = typeof element.row === "number" && !hasRowCollision ? element.row : slotIndex;
-        const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * BAND_ROW_HEIGHT + element.fontSize * 0.6;
-        const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
+        const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * BAND_ROW_HEIGHT + effectiveFontSize * 0.6;
+        const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + effectiveFontSize, requestedBaseline));
         if (element.handwritten) {
           const penColor = element.color && element.color !== "#333333" ? element.color : inkHex(settings);
-          const size = element.fontSize * 1.2;
+          const size = effectiveFontSize * 1.2;
           const width = measureHandwritten(ctx, text, settings, size);
           const x =
             element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 - width / 2 : right - width;
           writeText(ctx, text, settings, x, baselineY, random, { size, color: penColor });
         } else {
           ctx.save();
-          ctx.font = `${element.fontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
+          ctx.font = `${effectiveFontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
           ctx.fillStyle = "#333333";
           ctx.textBaseline = "alphabetic";
           ctx.textAlign = element.slot === "left" ? "left" : element.slot === "center" ? "center" : "right";
@@ -603,6 +618,7 @@ function drawBand(
   } else {
     // Footer elements: strictly contained within footer boundary
     visible.forEach((element, idx) => {
+      const effectiveFontSize = element.textSize ? fontSizeForTextSize(element.textSize) : (element.fontSize || 20);
       const text = bandElementText(element, pageNumber, totalPages);
       // Auto-resolve row collision so elements sharing the same slot never overlap vertically
       const slotIndex = visible.slice(0, idx).filter((prev) => prev.slot === element.slot).length;
@@ -611,18 +627,18 @@ function drawBand(
       );
       const effectiveRow = typeof element.row === "number" && !hasRowCollision ? element.row : slotIndex;
       const footerRowHeight = 32;
-      const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * footerRowHeight + element.fontSize * 0.6;
-      const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
+      const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * footerRowHeight + effectiveFontSize * 0.6;
+      const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + effectiveFontSize, requestedBaseline));
       if (element.handwritten) {
         const penColor = element.color && element.color !== "#333333" ? element.color : inkHex(settings);
-        const size = element.fontSize * 1.2;
+        const size = effectiveFontSize * 1.2;
         const width = measureHandwritten(ctx, text, settings, size);
         const x =
           element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 - width / 2 : right - width;
         writeText(ctx, text, settings, x, baselineY, random, { size, color: penColor });
       } else {
         ctx.save();
-        ctx.font = `${element.fontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
+        ctx.font = `${effectiveFontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
         ctx.fillStyle = "#333333";
         ctx.textBaseline = "alphabetic";
         ctx.textAlign = element.slot === "left" ? "left" : element.slot === "center" ? "center" : "right";
