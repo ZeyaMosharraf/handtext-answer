@@ -193,7 +193,7 @@ function block(kind: BlockKind, text: string, marker?: string): Block {
 
 /** Detects whether content is formatted as HTML from the rich text editor. */
 export function isHtmlContent(raw: string): boolean {
-  return /<\s*(p|h1|h2|h3|ul|ol|table|blockquote|hr|div|span|strong|b|em|i|u)\b/i.test(raw);
+  return /<\s*(p|h1|h2|h3|ul|ol|table|blockquote|hr|div|span|strong|b|em|i|u|pre)\b/i.test(raw);
 }
 
 function unescapeHtml(str: string): string {
@@ -203,7 +203,8 @@ function unescapeHtml(str: string): string {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ");
+    .replace(/&nbsp;/g, " ")
+    .replace(/\u00A0/g, " ");
 }
 
 /** Parses inline HTML text runs into structured Seg[] */
@@ -324,7 +325,7 @@ export function parseHtmlContent(html: string): Block[] {
 
   // Match top-level blocks or sequential block tags
   const blockRegex =
-    /<(h1|h2|h3|h4|blockquote|hr|table|ul|ol|p|div)([^>]*)>([\s\S]*?)<\/\1>|<hr\s*\/?>/gi;
+    /<(h1|h2|h3|h4|blockquote|hr|table|ul|ol|p|div|pre)([^>]*)>([\s\S]*?)<\/\1>|<hr\s*\/?>/gi;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -419,14 +420,14 @@ export function parseHtmlContent(html: string): Block[] {
       continue;
     }
 
-    if (tag === "div" && /<(h1|h2|h3|h4|blockquote|hr|table|ul|ol|p|div)\b/i.test(inner)) {
+    if (tag === "div" && /<(h1|h2|h3|h4|blockquote|hr|table|ul|ol|p|div|pre)\b/i.test(inner)) {
       blocks.push(...parseHtmlContent(inner));
       continue;
     }
 
-    if (tag === "p" || tag === "div") {
+    if (tag === "p" || tag === "div" || tag === "pre") {
       const cleanInner = inner.trim();
-      if (!cleanInner || cleanInner === "<br>" || cleanInner === "<br/>") {
+      if (!cleanInner || cleanInner === "<br>" || cleanInner === "<br/>" || cleanInner === "<br />" || cleanInner === "&nbsp;") {
         blocks.push({ kind: "blank", text: "" });
         continue;
       }
@@ -461,7 +462,8 @@ function parseLegacyMarkdown(raw: string): Block[] {
   const lines = raw.replace(/\r/g, "").split("\n");
 
   for (let i = 0; i < lines.length; i++) {
-    const line = (lines[i] ?? "").trim();
+    const rawLine = lines[i] ?? "";
+    const line = rawLine.trim();
 
     if (isTableRow(line)) {
       const collected: string[][] = [];
@@ -527,7 +529,7 @@ function parseLegacyMarkdown(raw: string): Block[] {
       continue;
     }
 
-    blocks.push(block("paragraph", line));
+    blocks.push(block("paragraph", rawLine));
   }
 
   return blocks;
@@ -552,7 +554,8 @@ export function segsToHtml(segs: Seg[] | undefined): string {
       let t = seg.text
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br>");
       if (seg.bold) t = `<strong>${t}</strong>`;
       if (seg.italic) t = `<em>${t}</em>`;
       if (seg.underline) t = `<u>${t}</u>`;
@@ -683,10 +686,10 @@ export function htmlToPlainText(html: string): string {
   if (!isHtmlContent(html)) return html;
   const withLineBreaks = html
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|h[1-6]|li|tr|blockquote)>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr|blockquote|pre)>/gi, "\n")
     .replace(/<hr\s*\/?>/gi, "\n---\n");
   const stripped = withLineBreaks.replace(/<[^>]+>/g, "");
-  return unescapeHtml(stripped).replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+  return unescapeHtml(stripped).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd();
 }
 
 /** Converts plain text input from on-page writing into clean paragraph HTML. */
@@ -695,11 +698,10 @@ export function plainTextToHtml(plain: string): string {
   const lines = plain.split("\n");
   const paragraphs: string[] = [];
   for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) {
+    if (!line.trim()) {
       paragraphs.push("<p><br></p>");
     } else {
-      const escaped = trimmed
+      const escaped = line
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");

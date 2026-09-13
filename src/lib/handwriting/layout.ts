@@ -166,7 +166,27 @@ function fontString(settings: HandwritingSettings, scale: number) {
 function textWidth(ctx: CanvasRenderingContext2D, text: string, settings: HandwritingSettings, scale: number) {
   if (!text) return 0;
   ctx.font = fontString(settings, scale);
-  return ctx.measureText(text).width * settings.compactness + text.length * settings.letterSpacing * scale;
+  const speed = settings.writingSpeed ?? 0;
+  const spaceWidth = settings.wordSpacing * (1 - speed * 0.18) * scale;
+  if (!text.includes(" ") && !text.includes("\t") && !text.includes("\u00a0")) {
+    return (
+      ctx.measureText(text).width * settings.compactness * (1 - speed * 0.06) +
+      text.length * settings.letterSpacing * scale * (1 - speed * 0.3)
+    );
+  }
+  const normalized = text.replace(/\u00a0/g, " ").replace(/\t/g, "    ");
+  let total = 0;
+  for (const part of normalized.split(/( +)/)) {
+    if (!part) continue;
+    if (part.startsWith(" ")) {
+      total += part.length * spaceWidth;
+    } else {
+      total +=
+        ctx.measureText(part).width * settings.compactness * (1 - speed * 0.06) +
+        part.length * settings.letterSpacing * scale * (1 - speed * 0.3);
+    }
+  }
+  return total;
 }
 
 function segmentsWidth(ctx: CanvasRenderingContext2D, segs: Seg[], settings: HandwritingSettings, scale: number) {
@@ -189,26 +209,43 @@ function wrapSegments(
 ) {
   const tokens: Seg[] = [];
   for (const seg of segs) {
-    for (const part of seg.text.split(/([ \t]+)/)) {
-      if (part) tokens.push({ ...seg, text: /^[ \t]+$/.test(part) ? " " : part });
+    const normalizedText = seg.text.replace(/\u00a0/g, " ").replace(/\t/g, "    ");
+    for (const part of normalizedText.split(/( +)/)) {
+      if (part) tokens.push({ ...seg, text: part });
     }
   }
 
   const lines: Seg[][] = [];
   let current: Seg[] = [];
   for (const token of tokens) {
-    if (token.text === " " && current.length === 0) continue;
+    const isSpaceToken = /^ +$/.test(token.text);
+    // On wrapped continuation lines (lines.length > 0), skip leading space
+    // that occurred at the wrap break boundary.
+    // BUT on the first line (lines.length === 0), preserve intentional user indentation.
+    if (isSpaceToken && current.length === 0 && lines.length > 0) {
+      continue;
+    }
+
     const candidate = [...current, token];
-    if (token.text !== " " && current.length && segmentsWidth(ctx, candidate, settings, scale) > maxWidth) {
-      while (current.at(-1)?.text === " ") current.pop();
-      lines.push(current);
+    if (!isSpaceToken && current.length && segmentsWidth(ctx, candidate, settings, scale) > maxWidth) {
+      while (current.length && /^ +$/.test(current.at(-1)?.text ?? "")) {
+        current.pop();
+      }
+      if (current.length) {
+        lines.push(current);
+      }
       current = [token];
     } else {
       current.push(token);
     }
   }
-  while (current.at(-1)?.text === " ") current.pop();
-  if (current.length) lines.push(current);
+
+  while (current.length && /^ +$/.test(current.at(-1)?.text ?? "")) {
+    current.pop();
+  }
+  if (current.length) {
+    lines.push(current);
+  }
   return lines;
 }
 
@@ -387,7 +424,7 @@ function blockLines(
   logicalLines.forEach((lineSegs, logicalLineIdx) => {
     const wrapped = wrapSegments(ctx, lineSegs, settings, scale, availableWidth);
     if (wrapped.length === 0) {
-      if (logicalLineIdx > 0) {
+      if (logicalLines.length > 1 || logicalLineIdx > 0) {
         resultLines.push({
           type: "line",
           segs: plainSegments(""),
@@ -482,7 +519,7 @@ function buildFlow(
   let tableId = 0;
   for (const block of blocks) {
     if (block.kind === "blank") {
-      pendingGapLines = Math.max(pendingGapLines, 1);
+      pendingGapLines += 1;
       continue;
     }
     if (block.kind === "divider") {
@@ -507,6 +544,19 @@ function buildFlow(
     pendingGapLines = 0;
     flow.push(...laid);
   }
+
+  if (pendingGapLines > 0) {
+    flow.push({
+      type: "line",
+      segs: plainSegments(""),
+      kind: "paragraph",
+      indent: 0,
+      scale: 1,
+      underline: false,
+      gapLines: pendingGapLines,
+    });
+  }
+
   return flow;
 }
 
@@ -536,8 +586,20 @@ function paginate(
   };
 
   for (const item of flow) {
-    let gapLines = placements.length === 0 ? 0 : item.gapLines;
+    let gapLines = placements.length === 0 && pages.length > 0 ? 0 : item.gapLines;
     const units = item.type === "line" ? 1 : item.lineUnits;
+
+    // Handle large blank gaps that span across entire pages
+    while (currentLineIndex + gapLines >= capacity && placements.length > 0) {
+      const remainingOnPage = capacity - currentLineIndex;
+      gapLines = Math.max(0, gapLines - remainingOnPage);
+      finishPage();
+    }
+    while (gapLines >= capacity) {
+      gapLines -= capacity;
+      finishPage();
+    }
+
     if (currentLineIndex + gapLines + units > capacity && placements.length > 0) {
       finishPage();
       gapLines = 0;
@@ -550,7 +612,11 @@ function paginate(
       }
     }
 
-    const lineIndex = currentLineIndex + gapLines;
+    if (placements.length === 0 && currentLineIndex + gapLines + units > capacity) {
+      gapLines = Math.max(0, capacity - units - currentLineIndex);
+    }
+
+    const lineIndex = Math.min(capacity - 1, currentLineIndex + gapLines);
     if (item.type === "line") {
       placements.push({
         type: "line",
@@ -565,7 +631,7 @@ function paginate(
     } else {
       placements.push({ ...item, lineIndex });
     }
-    currentLineIndex = lineIndex + units;
+    currentLineIndex = Math.min(capacity, lineIndex + units);
   }
 
   if (placements.length || pages.length === 0) pages.push({ pageNumber, coordinates, placements });

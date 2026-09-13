@@ -424,7 +424,10 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
     const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
       const plain = e.clipboardData.getData("text/plain");
       // Check if pasted content contains legacy markdown markers like **bold**, __underline__, ==black==
-      if (/(\*\*|__|==|\*|_)/.test(plain) && !isHtmlContent(plain)) {
+      if (
+        /(\*\*[^*\n]+\*\*|__[^\n_]+__|==[^\n=]+==)/.test(plain) &&
+        !isHtmlContent(plain)
+      ) {
         e.preventDefault();
         const converted = migrateLegacyContentToHtml(plain);
         document.execCommand("insertHTML", false, converted);
@@ -449,7 +452,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         onMouseUp={updateFormatState}
         onFocus={updateFormatState}
         className={cn(
-          "min-h-0 flex-1 rounded-lg border border-input bg-card p-4 text-base leading-relaxed text-foreground outline-none transition-colors",
+          "min-h-0 flex-1 rounded-lg border border-input bg-card p-4 text-base leading-relaxed text-foreground outline-none transition-colors cursor-text",
           "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
           "overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]",
           "[&_h1]:mb-3 [&_h1]:mt-4 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:tracking-tight",
@@ -460,9 +463,10 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
           "[&_li]:mb-1",
           "[&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-primary/40 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground",
           "[&_hr]:my-4 [&_hr]:border-border",
-          "[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:border [&_table]:border-border",
-          "[&_th]:border [&_th]:border-border [&_th]:bg-muted/40 [&_th]:p-2 [&_th]:font-semibold [&_th]:text-left",
-          "[&_td]:border [&_td]:border-border [&_td]:p-2",
+          "[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:border [&_table]:border-border [&_table]:cursor-text",
+          "[&_thead]:cursor-text [&_tbody]:cursor-text [&_tr]:cursor-text",
+          "[&_th]:border [&_th]:border-border [&_th]:bg-muted/40 [&_th]:p-2 [&_th]:font-semibold [&_th]:text-left [&_th]:cursor-text",
+          "[&_td]:border [&_td]:border-border [&_td]:p-2 [&_td]:cursor-text",
           "[&_strong]:font-bold",
           "[&_em]:italic",
           "[&_u]:underline",

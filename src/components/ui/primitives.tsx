@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 /* ---------------------------------- Button --------------------------------- */
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-semibold transition-all disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-semibold transition-all cursor-pointer disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
   {
     variants: {
       variant: {
@@ -96,7 +96,7 @@ export const Select = React.forwardRef<
   <select
     ref={ref}
     className={cn(
-      "h-10 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground",
+      "h-10 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground cursor-pointer disabled:cursor-not-allowed",
       className,
     )}
     {...props}

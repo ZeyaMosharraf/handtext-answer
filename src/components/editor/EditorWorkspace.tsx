@@ -656,7 +656,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
             aria-selected={tab === t}
             onClick={() => setTab(t)}
             className={cn(
-              "flex-1 rounded-lg px-3 py-2 text-sm font-medium capitalize",
+              "flex-1 rounded-lg px-3 py-2 text-sm font-medium capitalize cursor-pointer",
               tab === t ? "bg-accent text-accent-foreground" : "text-muted-foreground",
             )}
           >
@@ -794,7 +794,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
               onClick={() => {
                 if (writeOnPage) onPageRef.current?.focus();
               }}
-              className="relative select-none w-full max-w-[500px]"
+              className={cn("relative select-none w-full max-w-[500px]", writeOnPage ? "cursor-text" : "cursor-default")}
             >
               <canvas
                 ref={previewCanvasRef}
@@ -822,7 +822,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
                         aria-label="Write directly on the page"
                         spellCheck={false}
                         autoFocus
-                        className="absolute resize-none border-0 bg-transparent p-0 text-transparent caret-primary outline-none selection:bg-primary/20"
+                        className="absolute resize-none border-0 bg-transparent p-0 text-transparent caret-primary outline-none selection:bg-primary/20 cursor-text"
                         style={{
                           left: `${area.left * 100}%`,
                           top: `${area.top * 100}%`,

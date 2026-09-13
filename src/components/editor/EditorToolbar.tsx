@@ -182,7 +182,7 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
         </div>
 
         {scaleMenuOpen && (
-          <div className="absolute left-0 top-full z-50 mt-1.5 w-36 rounded-lg border border-border bg-popover p-1 shadow-lg backdrop-blur animate-in fade-in zoom-in-95">
+          <div className="absolute left-0 top-full z-50 mt-1.5 w-36 rounded-lg border border-border bg-popover p-1 shadow-lg backdrop-blur animate-in fade-in zoom-in-95 cursor-default">
             {FONT_SCALES.map((s) => (
               <button
                 key={s.scale}
@@ -193,12 +193,12 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
                   setScaleMenuOpen(false);
                 }}
                 className={cn(
-                  "flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground",
+                  "flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground cursor-pointer",
                   formatState.scale === s.scale ? "bg-accent/70 font-semibold" : "text-popover-foreground",
                 )}
               >
                 <span>{s.label}</span>
-                {formatState.scale === s.scale && <Check className="size-3 text-primary" />}
+                {formatState.scale === s.scale && <Check className="size-3.5 text-primary" />}
               </button>
             ))}
           </div>
@@ -227,7 +227,7 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
         </Button>
 
         {colorMenuOpen && (
-          <div className="absolute left-0 top-full z-50 mt-1.5 w-44 rounded-lg border border-border bg-popover p-2 shadow-lg backdrop-blur animate-in fade-in zoom-in-95">
+          <div className="absolute left-0 top-full z-50 mt-1.5 w-44 rounded-lg border border-border bg-popover p-2 shadow-lg backdrop-blur animate-in fade-in zoom-in-95 cursor-default">
             <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Student Inks
             </div>
@@ -242,7 +242,7 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
                     setColorMenuOpen(false);
                   }}
                   title={ink.label}
-                  className="flex flex-col items-center gap-1 rounded p-1 text-[10px] transition-colors hover:bg-accent"
+                  className="flex flex-col items-center gap-1 rounded p-1 text-[10px] transition-colors hover:bg-accent cursor-pointer"
                 >
                   <span
                     className={cn(
@@ -263,7 +263,7 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
                   editorRef.current?.setTextColor(null);
                   setColorMenuOpen(false);
                 }}
-                className="w-full rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="w-full rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
               >
                 Default ink
               </button>
@@ -298,11 +298,11 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
         </Button>
 
         {highlightMenuOpen && (
-          <div className="absolute left-0 top-full z-50 mt-1.5 w-40 rounded-lg border border-border bg-popover p-2 shadow-lg backdrop-blur animate-in fade-in zoom-in-95">
+          <div className="absolute left-0 top-full z-50 mt-1.5 w-40 rounded-lg border border-border bg-popover p-2 shadow-lg backdrop-blur animate-in fade-in zoom-in-95 cursor-default">
             <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Highlighter Wash
             </div>
-            <div className="grid grid-cols-5 gap-1">
+            <div className="grid grid-cols-5 gap-1.5">
               {HIGHLIGHT_COLORS.map((h) => (
                 <button
                   key={h.id}
@@ -313,7 +313,7 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
                     setHighlightMenuOpen(false);
                   }}
                   title={h.label}
-                  className="flex items-center justify-center p-1 rounded hover:bg-accent"
+                  className="flex items-center justify-center p-1 rounded hover:bg-accent cursor-pointer"
                 >
                   <span
                     className={cn(
@@ -333,7 +333,7 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
                   editorRef.current?.setHighlight(null);
                   setHighlightMenuOpen(false);
                 }}
-                className="w-full rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="w-full rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
               >
                 Remove highlight
               </button>
@@ -361,7 +361,7 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
         </Button>
 
         {tablePopoverOpen && (
-          <div className="absolute left-0 top-full z-50 mt-1.5 w-52 rounded-lg border border-border bg-popover p-3 shadow-lg backdrop-blur animate-in fade-in zoom-in-95">
+          <div className="absolute left-0 top-full z-50 mt-1.5 w-52 rounded-lg border border-border bg-popover p-3 shadow-lg backdrop-blur animate-in fade-in zoom-in-95 cursor-default">
             <div className="mb-2 text-xs font-semibold text-foreground">Insert Table</div>
             <div className="flex items-center gap-2 mb-3">
               <div className="space-y-1">

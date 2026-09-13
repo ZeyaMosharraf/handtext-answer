@@ -143,7 +143,7 @@ function estimateSegmentWidth(
   ctx.font = `${segment.italic ? "italic " : ""}${size}px "${settings.fontFamily}", cursive`;
   let w = 0;
   for (const ch of segment.text) {
-    if (ch === " ") {
+    if (ch === " " || ch === "\u00a0") {
       w += settings.wordSpacing * (1 - settings.writingSpeed * 0.18) * segScale;
     } else {
       w +=
@@ -206,7 +206,7 @@ function writeSegments(
     }
 
     for (const character of segment.text) {
-      if (character === " ") {
+      if (character === " " || character === "\u00a0") {
         x +=
           (settings.wordSpacing + (random() - 0.5) * settings.wordSpacing * 0.35 * settings.imperfection) *
           (1 - speed * 0.18) *
