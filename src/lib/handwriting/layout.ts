@@ -116,7 +116,14 @@ export const BAND_ROW_HEIGHT = 40;
 
 export function bandElementText(element: PageElement, pageNumber: number, totalPages: number) {
   if (element.kind === "pageNumber") {
-    const formatted = formatPageNumber(element.format, pageNumber, totalPages).trim();
+    const start = Math.max(
+      1,
+      typeof element.startPageNumber === "number" && !isNaN(element.startPageNumber)
+        ? Math.floor(element.startPageNumber)
+        : 1,
+    );
+    const displayPageNumber = start + (pageNumber - 1);
+    const formatted = formatPageNumber(element.format, displayPageNumber, totalPages).trim();
     if (element.label?.trim()) {
       return `${element.label.trim()}: ${formatted}`;
     }

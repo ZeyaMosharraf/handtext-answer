@@ -719,7 +719,7 @@ function HeaderEditor({
       color: "#333333",
       handwritten: false,
       enabled: true,
-      ...(selectedKind === "pageNumber" ? { format: "n", label: "Page No." } : {}),
+      ...(selectedKind === "pageNumber" ? { format: "n", label: "Page No.", startPageNumber: 1 } : {}),
     });
 
     if (scope === "all") {
@@ -1105,23 +1105,50 @@ function HeaderEditor({
 
                     {/* Field value or format input */}
                     {el.kind === "pageNumber" ? (
-                      <div className="space-y-1">
-                        <label htmlFor={`field-format-${el.id}`} className="text-[11px] text-muted-foreground">
-                          Number format
-                        </label>
-                        <Select
-                          id={`field-format-${el.id}`}
-                          aria-label="Page number format"
-                          value={el.format ?? "n"}
-                          onChange={(e) => handleUpdateElement(el.id, { format: e.target.value as PageNumberFormat })}
-                          className="text-xs h-8"
-                        >
-                          {PAGE_NUMBER_FORMATS.map((f) => (
-                            <option key={f.id} value={f.id}>
-                              {f.label}
-                            </option>
-                          ))}
-                        </Select>
+                      <div className="space-y-1.5">
+                        <div className="space-y-1">
+                          <label htmlFor={`field-format-${el.id}`} className="text-[11px] text-muted-foreground">
+                            Number format
+                          </label>
+                          <Select
+                            id={`field-format-${el.id}`}
+                            aria-label="Page number format"
+                            value={el.format ?? "n"}
+                            onChange={(e) => handleUpdateElement(el.id, { format: e.target.value as PageNumberFormat })}
+                            className="text-xs h-8"
+                          >
+                            {PAGE_NUMBER_FORMATS.map((f) => (
+                              <option key={f.id} value={f.id}>
+                                {f.label}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <label htmlFor={`field-start-${el.id}`} className="text-[11px] text-muted-foreground">
+                            Starting page number
+                          </label>
+                          <Input
+                            id={`field-start-${el.id}`}
+                            type="number"
+                            min={1}
+                            step={1}
+                            aria-label="Starting page number"
+                            value={el.startPageNumber ?? 1}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              if (raw === "") {
+                                handleUpdateElement(el.id, { startPageNumber: 1 });
+                                return;
+                              }
+                              const parsed = parseInt(raw, 10);
+                              if (!isNaN(parsed) && parsed >= 1) {
+                                handleUpdateElement(el.id, { startPageNumber: parsed });
+                              }
+                            }}
+                            className="text-xs h-8"
+                          />
+                        </div>
                       </div>
                     ) : (
                       <div className="space-y-1">
@@ -1349,7 +1376,7 @@ function FooterEditor({
       color: "#333333",
       handwritten: false,
       enabled: true,
-      ...(selectedKind === "pageNumber" ? { format: "n", label: "Page No." } : {}),
+      ...(selectedKind === "pageNumber" ? { format: "n", label: "Page No.", startPageNumber: 1 } : {}),
       ...(selectedKind === "text" ? { label: "", value: "Custom text" } : {}),
     });
 
@@ -1736,23 +1763,50 @@ function FooterEditor({
 
                     {/* Field value or format input */}
                     {el.kind === "pageNumber" ? (
-                      <div className="space-y-1">
-                        <label htmlFor={`footer-field-format-${el.id}`} className="text-[11px] text-muted-foreground">
-                          Number format
-                        </label>
-                        <Select
-                          id={`footer-field-format-${el.id}`}
-                          aria-label="Page number format"
-                          value={el.format ?? "n"}
-                          onChange={(e) => handleUpdateElement(el.id, { format: e.target.value as PageNumberFormat })}
-                          className="text-xs h-8"
-                        >
-                          {PAGE_NUMBER_FORMATS.map((f) => (
-                            <option key={f.id} value={f.id}>
-                              {f.label}
-                            </option>
-                          ))}
-                        </Select>
+                      <div className="space-y-1.5">
+                        <div className="space-y-1">
+                          <label htmlFor={`footer-field-format-${el.id}`} className="text-[11px] text-muted-foreground">
+                            Number format
+                          </label>
+                          <Select
+                            id={`footer-field-format-${el.id}`}
+                            aria-label="Page number format"
+                            value={el.format ?? "n"}
+                            onChange={(e) => handleUpdateElement(el.id, { format: e.target.value as PageNumberFormat })}
+                            className="text-xs h-8"
+                          >
+                            {PAGE_NUMBER_FORMATS.map((f) => (
+                              <option key={f.id} value={f.id}>
+                                {f.label}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <label htmlFor={`footer-field-start-${el.id}`} className="text-[11px] text-muted-foreground">
+                            Starting page number
+                          </label>
+                          <Input
+                            id={`footer-field-start-${el.id}`}
+                            type="number"
+                            min={1}
+                            step={1}
+                            aria-label="Starting page number"
+                            value={el.startPageNumber ?? 1}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              if (raw === "") {
+                                handleUpdateElement(el.id, { startPageNumber: 1 });
+                                return;
+                              }
+                              const parsed = parseInt(raw, 10);
+                              if (!isNaN(parsed) && parsed >= 1) {
+                                handleUpdateElement(el.id, { startPageNumber: parsed });
+                              }
+                            }}
+                            className="text-xs h-8"
+                          />
+                        </div>
                       </div>
                     ) : (
                       <div className="space-y-1">

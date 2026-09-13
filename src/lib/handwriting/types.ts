@@ -51,6 +51,7 @@ export interface PageElement {
   enabled: boolean;
   applyTo: ApplyTo;
   format?: PageNumberFormat;
+  startPageNumber?: number;
 }
 
 export interface BandConfig {
@@ -73,6 +74,7 @@ export interface ElementOverride {
   handwritten?: boolean | undefined;
   enabled?: boolean | undefined;
   format?: PageNumberFormat | undefined;
+  startPageNumber?: number | undefined;
 }
 
 export interface BandOverride {
@@ -323,7 +325,7 @@ export function newElement(kind: ElementKind, partial: Partial<PageElement> = {}
     handwritten: false,
     enabled: true,
     applyTo: "all",
-    ...(kind === "pageNumber" ? { format: "n" as PageNumberFormat } : {}),
+    ...(kind === "pageNumber" ? { format: "n" as PageNumberFormat, startPageNumber: 1 } : {}),
     ...partial,
   };
 }
@@ -453,6 +455,7 @@ export function resolveEffectiveBand(
       if (override.handwritten !== undefined) patched.handwritten = override.handwritten;
       if (override.enabled !== undefined) patched.enabled = override.enabled;
       if (override.format !== undefined) patched.format = override.format;
+      if (override.startPageNumber !== undefined) patched.startPageNumber = override.startPageNumber;
       return patched;
     });
 

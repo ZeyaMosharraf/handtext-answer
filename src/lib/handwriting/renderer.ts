@@ -499,9 +499,16 @@ function drawBand(
 
         if (element.handwritten) {
           const label = element.label.trim();
+          const start = Math.max(
+            1,
+            typeof element.startPageNumber === "number" && !isNaN(element.startPageNumber)
+              ? Math.floor(element.startPageNumber)
+              : 1,
+          );
+          const displayPageNumber = start + (pageNumber - 1);
           const value =
             element.kind === "pageNumber"
-              ? formatPageNumber(element.format, pageNumber, totalPages)
+              ? formatPageNumber(element.format, displayPageNumber, totalPages)
               : element.value.trim();
           if (label && value) {
             ctx.save();
