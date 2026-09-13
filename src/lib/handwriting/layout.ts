@@ -4,6 +4,7 @@ import {
   pageDimensions,
   resolveEffectiveBand,
   type BandConfig,
+  type ColumnAlignment,
   type HandwritingSettings,
   type PageElement,
 } from "./types";
@@ -43,6 +44,7 @@ export interface LayoutTableRow {
   isLast: boolean;
   cells: string[][];
   columnWidths: number[];
+  alignments?: ColumnAlignment[];
 }
 
 export interface LayoutTableBounds {
@@ -84,6 +86,7 @@ interface FlowTableRow {
   isLast: boolean;
   cells: string[][];
   columnWidths: number[];
+  alignments?: ColumnAlignment[];
   lineUnits: number;
   gapLines: number;
 }
@@ -249,28 +252,62 @@ function wrapSegments(
   return lines;
 }
 
-function wrapWords(
+function wrapCellLines(
   ctx: CanvasRenderingContext2D,
   text: string,
   settings: HandwritingSettings,
   scale: number,
   maxWidth: number,
-) {
-  if (!text.trim()) return [];
-  const words = text.trim().split(/\s+/);
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (current && textWidth(ctx, candidate, settings, scale) > maxWidth) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = candidate;
+): string[] {
+  if (!text) return [];
+  // Split by explicit user newlines first
+  const logicalLines = text.split("\n");
+  const result: string[] = [];
+
+  for (let lIdx = 0; lIdx < logicalLines.length; lIdx++) {
+    const line = logicalLines[lIdx] ?? "";
+    // If the logical line is empty, preserve it as an empty line (intentional blank line)
+    if (!line) {
+      if (logicalLines.length > 1) {
+        result.push("");
+      }
+      continue;
+    }
+
+    // Check if the whole line fits inside maxWidth
+    // This preserves consecutive spaces, ASCII art, and intentional indentation!
+    const measuredWidth = textWidth(ctx, line, settings, scale);
+    if (measuredWidth <= maxWidth) {
+      result.push(line);
+      continue;
+    }
+
+    // If it exceeds maxWidth, wrap at word boundaries while respecting cell width
+    const initialResultLength = result.length;
+    const tokens = line.split(/( +)/);
+    let current = "";
+    for (const token of tokens) {
+      if (!token) continue;
+      const isSpace = /^ +$/.test(token);
+      const isStartOfLogicalLine = current === "" && result.length === initialResultLength;
+      if (isSpace && !current && !isStartOfLogicalLine) {
+        // Skip wrap-boundary leading space on wrapped continuation lines
+        continue;
+      }
+      const candidate = current + token;
+      if (current && textWidth(ctx, candidate, settings, scale) > maxWidth) {
+        result.push(current.trimEnd());
+        current = isSpace ? "" : token;
+      } else {
+        current = candidate;
+      }
+    }
+    if (current) {
+      result.push(current.trimEnd());
     }
   }
-  if (current) lines.push(current);
-  return lines;
+
+  return result.length > 0 ? result : (text.trim() ? [text] : []);
 }
 
 function activeCoordinateSystem(
@@ -476,9 +513,13 @@ function tableRows(
   const widthScale = contentWidth / naturalTotal;
   const columnWidths = natural.map((width) => width * widthScale);
 
+  const alignments: ColumnAlignment[] = Array.from({ length: columns }, (_, column) => {
+    return table.alignments?.[column] ?? "left";
+  });
+
   return table.rows.map((row, rowIndex) => {
     const cells = columnWidths.map((width, column) =>
-      wrapWords(ctx, row[column] ?? "", settings, scale, Math.max(24, width - padding * 2)),
+      wrapCellLines(ctx, row[column] ?? "", settings, scale, Math.max(24, width - padding * 2)),
     );
     const textLines = Math.max(1, ...cells.map((lines) => lines.length));
     // Keep at least one complete ruled interval around the writing. This lets
@@ -492,6 +533,7 @@ function tableRows(
       isLast: rowIndex === table.rows.length - 1,
       cells,
       columnWidths,
+      alignments,
       lineUnits: Math.max(2, textLines + 1 + paddingLines),
       gapLines: 0,
     };
@@ -603,12 +645,13 @@ function paginate(
     if (currentLineIndex + gapLines + units > capacity && placements.length > 0) {
       finishPage();
       gapLines = 0;
-      if (item.type === "tableRow" && settings.table.repeatHeader && !item.isHeader) {
-        const header = tableHeaders.get(item.tableId);
-        if (header && header.lineUnits + units <= capacity) {
-          placements.push({ ...header, lineIndex: 0, isFirst: true });
-          currentLineIndex = header.lineUnits;
-        }
+    }
+
+    if (placements.length === 0 && pages.length > 0 && item.type === "tableRow" && settings.table.repeatHeader && !item.isHeader) {
+      const header = tableHeaders.get(item.tableId);
+      if (header && header.lineUnits + units <= capacity) {
+        placements.push({ ...header, lineIndex: 0, isFirst: true });
+        currentLineIndex = header.lineUnits;
       }
     }
 

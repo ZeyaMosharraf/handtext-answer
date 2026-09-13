@@ -167,6 +167,8 @@ export interface PageConfig {
   footerHeight: number;
 }
 
+export type ColumnAlignment = "left" | "center" | "right";
+
 export interface TableStyle {
   borderColor: string;
   borderWidth: number;

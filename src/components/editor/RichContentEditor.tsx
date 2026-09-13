@@ -24,6 +24,7 @@ export interface RichContentEditorHandle {
   setHighlight: (color: string | null) => void;
   clearFormatting: () => void;
   insertTable: (rows: number, cols: number) => void;
+  setTableColumnAlignment: (colIndex: number, alignment: "left" | "center" | "right") => void;
   focus: () => void;
   getFormatState: () => FormatState;
 }
@@ -371,6 +372,56 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       [triggerChange],
     );
 
+    const setTableColumnAlignment = useCallback(
+      (colIndex: number, alignment: "left" | "center" | "right") => {
+        const el = editorRef.current;
+        if (!el) return;
+
+        const tables = el.querySelectorAll("table");
+        if (tables.length > 0) {
+          tables.forEach((table) => {
+            const rows = Array.from(table.rows);
+            for (const row of rows) {
+              const cell = row.cells[colIndex];
+              if (cell) {
+                cell.style.textAlign = alignment;
+                cell.setAttribute("data-align", alignment);
+                cell.classList.remove("text-left", "text-center", "text-right");
+                cell.classList.add(`text-${alignment}`);
+              }
+            }
+          });
+          triggerChange();
+          return;
+        }
+
+        // If content is currently markdown table, update the divider row
+        const raw = el.innerText || el.textContent || "";
+        if (raw.includes("|")) {
+          const lines = raw.split("\n");
+          let updated = false;
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i]?.trim() ?? "";
+            if (/^\|[\s:|-]+\|$/.test(line) && line.includes("-")) {
+              const parts = line.slice(1, -1).split("|");
+              if (parts[colIndex] !== undefined) {
+                const alignMarker = alignment === "center" ? " :---: " : alignment === "right" ? " ---: " : " :--- ";
+                parts[colIndex] = alignMarker;
+                lines[i] = `|${parts.join("|")}|`;
+                updated = true;
+                break;
+              }
+            }
+          }
+          if (updated) {
+            el.innerText = lines.join("\n");
+            triggerChange();
+          }
+        }
+      },
+      [triggerChange],
+    );
+
     useImperativeHandle(
       ref,
       () => ({
@@ -383,6 +434,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         setHighlight,
         clearFormatting,
         insertTable,
+        setTableColumnAlignment,
         focus: () => editorRef.current?.focus(),
         getFormatState: () => formatState,
       }),
@@ -396,6 +448,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         setHighlight,
         clearFormatting,
         insertTable,
+        setTableColumnAlignment,
         formatState,
       ],
     );
@@ -465,8 +518,8 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
           "[&_hr]:my-4 [&_hr]:border-border",
           "[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:border [&_table]:border-border [&_table]:cursor-text",
           "[&_thead]:cursor-text [&_tbody]:cursor-text [&_tr]:cursor-text",
-          "[&_th]:border [&_th]:border-border [&_th]:bg-muted/40 [&_th]:p-2 [&_th]:font-semibold [&_th]:text-left [&_th]:cursor-text",
-          "[&_td]:border [&_td]:border-border [&_td]:p-2 [&_td]:cursor-text",
+          "[&_th]:border [&_th]:border-border [&_th]:bg-muted/40 [&_th]:p-2 [&_th]:font-semibold [&_th]:cursor-text [&_th]:whitespace-pre-wrap",
+          "[&_td]:border [&_td]:border-border [&_td]:p-2 [&_td]:cursor-text [&_td]:whitespace-pre-wrap",
           "[&_strong]:font-bold",
           "[&_em]:italic",
           "[&_u]:underline",

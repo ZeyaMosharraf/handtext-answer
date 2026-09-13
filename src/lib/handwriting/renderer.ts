@@ -1,4 +1,4 @@
-import { HIGHLIGHT_COLOR, type Seg } from "./parse";
+import { HIGHLIGHT_COLOR, parseInline, type Seg } from "./parse";
 import {
   BAND_PAD_TOP,
   BAND_ROW_HEIGHT,
@@ -268,9 +268,33 @@ function writeText(
 }
 
 function measureHandwritten(ctx: CanvasRenderingContext2D, text: string, settings: HandwritingSettings, size: number) {
-  if (!text.trim()) return 0;
+  if (!text) return 0;
   ctx.font = `${size}px "${settings.fontFamily}", cursive`;
   return ctx.measureText(text).width * settings.compactness + text.length * settings.letterSpacing;
+}
+
+function measureSegments(ctx: CanvasRenderingContext2D, segs: Seg[], settings: HandwritingSettings, baseSize: number) {
+  const speed = settings.writingSpeed ?? 0;
+  const scale = baseSize / settings.fontSize;
+  return segs.reduce((sum, seg) => {
+    const segScale = scale * (seg.scale ?? 1);
+    const size = settings.fontSize * segScale;
+    ctx.font = `${seg.italic ? "italic " : ""}${size}px "${settings.fontFamily}", cursive`;
+    const spaceWidth = settings.wordSpacing * (1 - speed * 0.18) * segScale;
+    const normalized = seg.text.replace(/\u00a0/g, " ").replace(/\t/g, "    ");
+    let segTotal = 0;
+    for (const part of normalized.split(/( +)/)) {
+      if (!part) continue;
+      if (part.startsWith(" ")) {
+        segTotal += part.length * spaceWidth;
+      } else {
+        segTotal +=
+          ctx.measureText(part).width * settings.compactness * (1 - speed * 0.06) +
+          part.length * settings.letterSpacing * segScale * (1 - speed * 0.3);
+      }
+    }
+    return sum + segTotal;
+  }, 0);
 }
 
 function inkLine(
@@ -676,25 +700,44 @@ function drawTableRow(
 
   x = left;
   placement.cells.forEach((lines, column) => {
+    const colWidth = placement.columnWidths[column] ?? 0;
+    const colLeft = x;
+    const innerWidth = Math.max(0, colWidth - settings.table.cellPadding * 2);
+    const align = placement.alignments?.[column] ?? "left";
+
     const availableLines = placement.lineUnits;
     const firstTextLine = placement.lineIndex + Math.max(0, Math.floor((availableLines - lines.length) / 2));
+    const fontScale = settings.table.fontScale;
+    const baseSize = settings.fontSize * fontScale * (placement.isHeader ? 1.02 : 1);
+
     lines.forEach((text, line) => {
-      if (!text.trim()) return;
-      writeText(
+      if (!text || !text.trim()) return;
+
+      const segs = parseInline(text);
+      const lineWidth = measureSegments(ctx, segs, settings, baseSize);
+
+      let textX = colLeft + settings.table.cellPadding;
+      if (align === "center") {
+        textX = colLeft + settings.table.cellPadding + Math.max(0, (innerWidth - lineWidth) / 2);
+      } else if (align === "right") {
+        textX = colLeft + settings.table.cellPadding + Math.max(0, innerWidth - lineWidth);
+      }
+
+      writeSegments(
         ctx,
-        text,
+        segs,
         settings,
-        x + settings.table.cellPadding,
+        textX,
         getBaseline(coordinates, firstTextLine + line),
         random,
         {
-          size: settings.fontSize * settings.table.fontScale * (placement.isHeader ? 1.02 : 1),
+          size: baseSize,
           color: ink,
-          scale: settings.table.fontScale,
+          scale: fontScale,
         },
       );
     });
-    x += placement.columnWidths[column] ?? 0;
+    x += colWidth;
   });
   return { tableId: placement.tableId, left, top, right, bottom };
 }

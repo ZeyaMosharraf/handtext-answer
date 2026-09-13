@@ -889,6 +889,10 @@ export function EditorWorkspace({ project }: { project: Project }) {
                 const found = templates.find((t) => t.id === id);
                 if (found) commit((p) => ({ ...p, settings: found.settings }));
               }}
+              content={content}
+              onSetTableColumnAlignment={(colIndex, alignment) =>
+                richEditorRef.current?.setTableColumnAlignment(colIndex, alignment)
+              }
               onDeleteTemplate={(id) => saveTemplates(templates.filter((t) => t.id !== id))}
             />
           </div>

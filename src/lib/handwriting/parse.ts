@@ -1,3 +1,5 @@
+import type { ColumnAlignment } from "./types";
+
 export type BlockKind =
   | "heading"
   | "subheading"
@@ -113,6 +115,7 @@ interface StyleFrame {
 export interface TableData {
   rows: string[][];
   headerRow: boolean;
+  alignments?: ColumnAlignment[];
 }
 
 export interface Block {
@@ -183,7 +186,7 @@ function cells(line: string) {
   return line
     .slice(1, -1)
     .split("|")
-    .map((c) => stripInline(c.trim()));
+    .map((c) => c.replace(/<br\s*\/?>/gi, "\n").trim());
 }
 
 function block(kind: BlockKind, text: string, marker?: string): Block {
@@ -392,21 +395,56 @@ export function parseHtmlContent(html: string): Block[] {
     if (tag === "table") {
       const rows: string[][] = [];
       let headerRow = false;
+      const alignments: ColumnAlignment[] = [];
       const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
       let trMatch: RegExpExecArray | null;
       let rowIndex = 0;
 
       while ((trMatch = trRe.exec(inner)) !== null) {
         const trContent = trMatch[1] ?? "";
-        const cellRe = /<(td|th)[^>]*>([\s\S]*?)<\/\1>/gi;
+        const cellRe = /<(td|th)([^>]*)>([\s\S]*?)<\/\1>/gi;
         let cellMatch: RegExpExecArray | null;
         const rowCells: string[] = [];
         let hasTh = false;
+        let colIndex = 0;
 
         while ((cellMatch = cellRe.exec(trContent)) !== null) {
-          if (cellMatch[1]?.toLowerCase() === "th") hasTh = true;
-          const cellText = unescapeHtml(cellMatch[2]?.replace(/<[^>]+>/g, "") ?? "").trim();
-          rowCells.push(cellText);
+          const isTh = cellMatch[1]?.toLowerCase() === "th";
+          if (isTh) hasTh = true;
+          const attrs = cellMatch[2] ?? "";
+          const rawCellHtml = cellMatch[3] ?? "";
+
+          // Extract column alignment
+          if (rowIndex === 0 || !alignments[colIndex]) {
+            let colAlign: ColumnAlignment = "left";
+            const alignAttr = attrs.match(/align=["']?(left|center|right)["']?/i);
+            const styleAlign = attrs.match(/text-align:\s*(left|center|right)/i);
+            const dataAlign = attrs.match(/data-align=["']?(left|center|right)["']?/i);
+            const classAlign = attrs.match(/\btext-(left|center|right)\b/i);
+
+            const matched = (alignAttr?.[1] || styleAlign?.[1] || dataAlign?.[1] || classAlign?.[1])?.toLowerCase();
+            if (matched === "center" || matched === "right" || matched === "left") {
+              colAlign = matched;
+            }
+            alignments[colIndex] = colAlign;
+          }
+
+          // Convert HTML to cell text preserving intentional newlines, spaces, and inline markers
+          let normalized = rawCellHtml
+            .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/<\/p>\s*<p[^>]*>/gi, "\n")
+            .replace(/<\/div>\s*<div[^>]*>/gi, "\n")
+            .replace(/<\/?(p|div)[^>]*>/gi, "\n")
+            .replace(/<(?:strong|b)[^>]*>([\s\S]*?)<\/(?:strong|b)>/gi, "**$1**")
+            .replace(/<(?:em|i)[^>]*>([\s\S]*?)<\/(?:em|i)>/gi, "*$1*")
+            .replace(/<u[^>]*>([\s\S]*?)<\/u>/gi, "__$1__");
+
+          normalized = normalized.replace(/<[^>]+>/g, "");
+          normalized = unescapeHtml(normalized);
+          normalized = normalized.replace(/\r/g, "").replace(/\n+$/, "");
+
+          rowCells.push(normalized);
+          colIndex++;
         }
 
         if (rowIndex === 0 && hasTh) headerRow = true;
@@ -415,7 +453,7 @@ export function parseHtmlContent(html: string): Block[] {
       }
 
       if (rows.length > 0) {
-        blocks.push({ kind: "table", text: "", table: { rows, headerRow } });
+        blocks.push({ kind: "table", text: "", table: { rows, headerRow, alignments } });
       }
       continue;
     }
@@ -468,10 +506,20 @@ function parseLegacyMarkdown(raw: string): Block[] {
     if (isTableRow(line)) {
       const collected: string[][] = [];
       let headerRow = false;
+      let alignments: ColumnAlignment[] = [];
       while (i < lines.length && isTableRow((lines[i] ?? "").trim())) {
         const current = (lines[i] ?? "").trim();
         if (isDivider(current)) {
           headerRow = collected.length === 1;
+          alignments = current
+            .slice(1, -1)
+            .split("|")
+            .map((col) => {
+              const trimmed = col.trim();
+              if (trimmed.startsWith(":") && trimmed.endsWith(":")) return "center";
+              if (trimmed.endsWith(":")) return "right";
+              return "left";
+            });
         } else {
           collected.push(cells(current));
         }
@@ -479,7 +527,7 @@ function parseLegacyMarkdown(raw: string): Block[] {
       }
       i--;
       if (collected.length) {
-        blocks.push({ kind: "table", text: "", table: { rows: collected, headerRow } });
+        blocks.push({ kind: "table", text: "", table: { rows: collected, headerRow, alignments } });
       }
       continue;
     }
@@ -675,7 +723,17 @@ export function tableToMarkdown(table: TableData): string {
   const out: string[] = [];
   table.rows.forEach((row, index) => {
     out.push(`| ${row.join(" | ")} |`);
-    if (index === 0 && table.headerRow) out.push(`|${row.map(() => "---").join("|")}|`);
+    if (index === 0 && table.headerRow) {
+      const divider = row
+        .map((_, colIdx) => {
+          const align = table.alignments?.[colIdx] ?? "left";
+          if (align === "center") return ":---:";
+          if (align === "right") return "---:";
+          return ":---";
+        })
+        .join("|");
+      out.push(`|${divider}|`);
+    }
   });
   return out.join("\n");
 }
