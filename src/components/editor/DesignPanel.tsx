@@ -5,6 +5,7 @@ import { ColorField } from "@/components/editor/ColorField";
 import { Badge, Button, Card, Input, Label, Select, Slider } from "@/components/ui/primitives";
 import {
   COLOR_PRESETS,
+  FIELD_PEN_COLORS,
   FORMAT_PRESETS,
   HANDWRITING_STYLES,
   HAND_FONTS,
@@ -1142,12 +1143,40 @@ function HeaderEditor({
                           type="checkbox"
                           id={`field-handwritten-${el.id}`}
                           checked={Boolean(el.handwritten)}
-                          onChange={(e) => handleUpdateElement(el.id, { handwritten: e.target.checked })}
+                          onChange={(e) => {
+                            const isChecked = e.target.checked;
+                            handleUpdateElement(el.id, {
+                              handwritten: isChecked,
+                              ...(isChecked && (!el.color || el.color === "#333333") ? { color: INK_COLORS.blue } : {}),
+                            });
+                          }}
                           className="size-3.5 rounded border-border accent-primary cursor-pointer"
                         />
                         <span>Handwritten</span>
                       </label>
                     </div>
+
+                    {/* Pen color (visible when handwritten) */}
+                    {el.handwritten && (
+                      <div className="space-y-1 pt-0.5">
+                        <label htmlFor={`field-color-${el.id}`} className="text-[11px] font-medium text-muted-foreground">
+                          Pen color
+                        </label>
+                        <Select
+                          id={`field-color-${el.id}`}
+                          aria-label="Pen color"
+                          value={el.color && Object.values(INK_COLORS).includes(el.color) ? el.color : INK_COLORS.blue}
+                          onChange={(e) => handleUpdateElement(el.id, { color: e.target.value })}
+                          className="text-xs h-8"
+                        >
+                          {FIELD_PEN_COLORS.map((c) => (
+                            <option key={c.id} value={c.value}>
+                              {c.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    )}
 
                     {/* Position segmented control */}
                     <div className="space-y-1 pt-0.5">
@@ -1745,12 +1774,40 @@ function FooterEditor({
                           type="checkbox"
                           id={`footer-field-handwritten-${el.id}`}
                           checked={Boolean(el.handwritten)}
-                          onChange={(e) => handleUpdateElement(el.id, { handwritten: e.target.checked })}
+                          onChange={(e) => {
+                            const isChecked = e.target.checked;
+                            handleUpdateElement(el.id, {
+                              handwritten: isChecked,
+                              ...(isChecked && (!el.color || el.color === "#333333") ? { color: INK_COLORS.blue } : {}),
+                            });
+                          }}
                           className="size-3.5 rounded border-border accent-primary cursor-pointer"
                         />
                         <span>Handwritten</span>
                       </label>
                     </div>
+
+                    {/* Pen color (visible when handwritten) */}
+                    {el.handwritten && (
+                      <div className="space-y-1 pt-0.5">
+                        <label htmlFor={`footer-field-color-${el.id}`} className="text-[11px] font-medium text-muted-foreground">
+                          Pen color
+                        </label>
+                        <Select
+                          id={`footer-field-color-${el.id}`}
+                          aria-label="Pen color"
+                          value={el.color && Object.values(INK_COLORS).includes(el.color) ? el.color : INK_COLORS.blue}
+                          onChange={(e) => handleUpdateElement(el.id, { color: e.target.value })}
+                          className="text-xs h-8"
+                        >
+                          {FIELD_PEN_COLORS.map((c) => (
+                            <option key={c.id} value={c.value}>
+                              {c.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    )}
 
                     {/* Position segmented control */}
                     <div className="space-y-1 pt-0.5">

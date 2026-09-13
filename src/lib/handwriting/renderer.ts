@@ -495,6 +495,7 @@ function drawBand(
         const rowY = boxTop + index * boxRowHeight;
         const baselineY = rowY + Math.round(boxRowHeight * 0.7);
         const text = bandElementText(element, pageNumber, totalPages);
+        const penColor = element.color && element.color !== "#333333" ? element.color : inkHex(settings);
 
         if (element.handwritten) {
           const label = element.label.trim();
@@ -505,32 +506,32 @@ function drawBand(
           if (label && value) {
             ctx.save();
             ctx.font = '13px "Plus Jakarta Sans", ui-sans-serif, sans-serif';
-            ctx.fillStyle = withAlpha(element.color, 0.75);
+            ctx.fillStyle = withAlpha("#333333", 0.75);
             ctx.textBaseline = "alphabetic";
             ctx.fillText(`${label}:`, boxLeft + 8, baselineY);
             const labelW = ctx.measureText(`${label}: `).width;
             ctx.restore();
             writeText(ctx, value, settings, boxLeft + 8 + labelW, baselineY, random, {
               size: element.fontSize * 1.05,
-              color: element.color,
+              color: penColor,
             });
           } else if (label) {
             ctx.save();
             ctx.font = '13px "Plus Jakarta Sans", ui-sans-serif, sans-serif';
-            ctx.fillStyle = withAlpha(element.color, 0.75);
+            ctx.fillStyle = withAlpha("#333333", 0.75);
             ctx.textBaseline = "alphabetic";
             ctx.fillText(`${label}:`, boxLeft + 8, baselineY);
             ctx.restore();
           } else {
             writeText(ctx, text, settings, boxLeft + 8, baselineY, random, {
               size: element.fontSize * 1.05,
-              color: element.color,
+              color: penColor,
             });
           }
         } else {
           ctx.save();
           ctx.font = '13px "Plus Jakarta Sans", ui-sans-serif, sans-serif';
-          ctx.fillStyle = element.color;
+          ctx.fillStyle = "#333333";
           ctx.textBaseline = "alphabetic";
           ctx.fillText(text, boxLeft + 8, baselineY);
           ctx.restore();
@@ -548,14 +549,15 @@ function drawBand(
         const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * BAND_ROW_HEIGHT + element.fontSize * 0.6;
         const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
         if (element.handwritten) {
+          const penColor = element.color && element.color !== "#333333" ? element.color : inkHex(settings);
           const size = element.fontSize * 1.2;
           const width = measureHandwritten(ctx, text, settings, size);
           const x = element.slot === "left" ? left : coordinates.pageWidth / 2 - width / 2;
-          writeText(ctx, text, settings, x, baselineY, random, { size, color: element.color });
+          writeText(ctx, text, settings, x, baselineY, random, { size, color: penColor });
         } else {
           ctx.save();
           ctx.font = `${element.fontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
-          ctx.fillStyle = element.color;
+          ctx.fillStyle = "#333333";
           ctx.textBaseline = "alphabetic";
           ctx.textAlign = element.slot === "left" ? "left" : "center";
           ctx.fillText(text, element.slot === "left" ? left : coordinates.pageWidth / 2, baselineY);
@@ -574,15 +576,16 @@ function drawBand(
         const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * BAND_ROW_HEIGHT + element.fontSize * 0.6;
         const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
         if (element.handwritten) {
+          const penColor = element.color && element.color !== "#333333" ? element.color : inkHex(settings);
           const size = element.fontSize * 1.2;
           const width = measureHandwritten(ctx, text, settings, size);
           const x =
             element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 - width / 2 : right - width;
-          writeText(ctx, text, settings, x, baselineY, random, { size, color: element.color });
+          writeText(ctx, text, settings, x, baselineY, random, { size, color: penColor });
         } else {
           ctx.save();
           ctx.font = `${element.fontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
-          ctx.fillStyle = element.color;
+          ctx.fillStyle = "#333333";
           ctx.textBaseline = "alphabetic";
           ctx.textAlign = element.slot === "left" ? "left" : element.slot === "center" ? "center" : "right";
           ctx.fillText(text, element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 : right, baselineY);
@@ -604,15 +607,16 @@ function drawBand(
       const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * footerRowHeight + element.fontSize * 0.6;
       const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
       if (element.handwritten) {
+        const penColor = element.color && element.color !== "#333333" ? element.color : inkHex(settings);
         const size = element.fontSize * 1.2;
         const width = measureHandwritten(ctx, text, settings, size);
         const x =
           element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 - width / 2 : right - width;
-        writeText(ctx, text, settings, x, baselineY, random, { size, color: element.color });
+        writeText(ctx, text, settings, x, baselineY, random, { size, color: penColor });
       } else {
         ctx.save();
         ctx.font = `${element.fontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
-        ctx.fillStyle = element.color;
+        ctx.fillStyle = "#333333";
         ctx.textBaseline = "alphabetic";
         ctx.textAlign = element.slot === "left" ? "left" : element.slot === "center" ? "center" : "right";
         ctx.fillText(text, element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 : right, baselineY);

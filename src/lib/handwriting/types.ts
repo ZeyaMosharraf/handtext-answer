@@ -196,6 +196,15 @@ export const INK_LABELS: Record<InkColor, string> = {
   custom: "Custom",
 };
 
+export const FIELD_PEN_COLORS: { id: string; label: string; value: string }[] = [
+  { id: "blue", label: "Blue", value: INK_COLORS.blue },
+  { id: "royal", label: "Royal blue", value: INK_COLORS.royal },
+  { id: "darkblue", label: "Dark blue", value: INK_COLORS.darkblue },
+  { id: "black", label: "Black", value: INK_COLORS.black },
+  { id: "red", label: "Red", value: INK_COLORS.red },
+  { id: "green", label: "Green", value: INK_COLORS.green },
+];
+
 export function inkHex(s: HandwritingSettings) {
   return s.ink === "custom" ? s.inkCustom : INK_COLORS[s.ink];
 }
