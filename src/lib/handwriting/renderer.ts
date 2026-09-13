@@ -13,7 +13,7 @@ import {
   type LayoutTableBounds,
   type PageCoordinateSystem,
 } from "./layout";
-import { formatPageNumber, inkHex, type BandConfig, type HandwritingSettings, type RulingType } from "./types";
+import { formatPageNumber, inkHex, resolveEffectiveBand, type BandConfig, type HandwritingSettings, type RulingType } from "./types";
 
 function makeRng(seed: number) {
   let state = seed >>> 0 || 1;
@@ -420,6 +420,7 @@ function paintPaper(
 
 function drawBand(
   ctx: CanvasRenderingContext2D,
+  which: "header" | "footer",
   band: BandConfig,
   settings: HandwritingSettings,
   coordinates: PageCoordinateSystem,
@@ -429,7 +430,7 @@ function drawBand(
   random: () => number,
 ) {
   if (!band.enabled || !bandApplies(band, pageNumber, totalPages)) return;
-  const isHeader = band === settings.header;
+  const isHeader = which === "header";
   const activeHeight = isHeader ? coordinates.headerHeight : coordinates.footerHeight;
   if (activeHeight <= 0) return;
   const pad = 36;
@@ -539,9 +540,12 @@ function drawBand(
     }
 
     // Left and center aligned elements in header
-    for (const element of otherElements) {
+    otherElements.forEach((element, idx) => {
       const text = bandElementText(element, pageNumber, totalPages);
-      const requestedBaseline = topY + BAND_PAD_TOP + element.row * BAND_ROW_HEIGHT + element.fontSize * 0.6;
+      // Auto-resolve row collision so elements never overlap vertically
+      const hasRowCollision = otherElements.slice(0, idx).some((prev) => prev.row === element.row && prev.slot === element.slot);
+      const effectiveRow = hasRowCollision ? idx : (typeof element.row === "number" ? element.row : idx);
+      const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * BAND_ROW_HEIGHT + element.fontSize * 0.6;
       const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
       if (element.handwritten) {
         const size = element.fontSize * 1.2;
@@ -557,12 +561,15 @@ function drawBand(
         ctx.fillText(text, element.slot === "left" ? left : coordinates.pageWidth / 2, baselineY);
         ctx.restore();
       }
-    }
+    });
   } else {
     // Footer elements: strictly contained within footer boundary
-    for (const element of visible) {
+    visible.forEach((element, idx) => {
       const text = bandElementText(element, pageNumber, totalPages);
-      const requestedBaseline = topY + BAND_PAD_TOP + element.row * BAND_ROW_HEIGHT + element.fontSize * 0.6;
+      // Auto-resolve row collision so elements sharing the same slot never overlap vertically
+      const hasRowCollision = visible.slice(0, idx).some((prev) => prev.row === element.row && prev.slot === element.slot);
+      const effectiveRow = hasRowCollision ? idx : (typeof element.row === "number" ? element.row : idx);
+      const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * BAND_ROW_HEIGHT + element.fontSize * 0.6;
       const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
       if (element.handwritten) {
         const size = element.fontSize * 1.2;
@@ -579,7 +586,7 @@ function drawBand(
         ctx.fillText(text, element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 : right, baselineY);
         ctx.restore();
       }
-    }
+    });
   }
 }
 
@@ -669,8 +676,8 @@ function drawDebug(
 }
 
 /** Writing area of a page as fractions of the page, for the direct-writing overlay. */
-export function writingArea(settings: HandwritingSettings) {
-  const coordinates = createPageCoordinateSystem(settings);
+export function writingArea(settings: HandwritingSettings, pageNumber = 1, totalPages = 1) {
+  const coordinates = createPageCoordinateSystem(settings, undefined, pageNumber, totalPages);
   const line0Top = coordinates.firstBaselineY - coordinates.rulingSpacing;
   return {
     pageWidth: coordinates.pageWidth,
@@ -703,7 +710,8 @@ export async function renderPageToCanvas(
   if (!measurer) throw new Error("Canvas rendering is unavailable");
   const documentLayout = layoutDocument(measurer, input);
   const totalPages = documentLayout.pages.length;
-  const page = documentLayout.pages[pageIndex] ?? documentLayout.pages[0];
+  const clampedIndex = totalPages > 0 ? Math.max(0, Math.min(pageIndex, totalPages - 1)) : 0;
+  const page = documentLayout.pages[clampedIndex] ?? documentLayout.pages[0];
   if (!page) throw new Error("No page available to render");
 
   if (targetCanvas.width !== page.coordinates.pageWidth || targetCanvas.height !== page.coordinates.pageHeight) {
@@ -719,13 +727,16 @@ export async function renderPageToCanvas(
   const random = makeRng(seed + page.pageNumber * 7919);
 
   paintPaper(ctx, input.settings, page.coordinates, random);
-  if (input.settings.header.enabled) {
-    drawBand(ctx, input.settings.header, input.settings, page.coordinates, 0, page.pageNumber, totalPages, random);
+  const effectiveHeader = resolveEffectiveBand(input.settings, "header", page.pageNumber, totalPages);
+  if (effectiveHeader.enabled) {
+    drawBand(ctx, "header", effectiveHeader, input.settings, page.coordinates, 0, page.pageNumber, totalPages, random);
   }
-  if (input.settings.footer.enabled) {
+  const effectiveFooter = resolveEffectiveBand(input.settings, "footer", page.pageNumber, totalPages);
+  if (effectiveFooter.enabled) {
     drawBand(
       ctx,
-      input.settings.footer,
+      "footer",
+      effectiveFooter,
       input.settings,
       page.coordinates,
       page.coordinates.pageHeight - page.coordinates.footerHeight,
@@ -794,13 +805,16 @@ export async function renderPages(input: RenderInput): Promise<RenderedPage[]> {
     if (!ctx) throw new Error("Canvas rendering is unavailable");
     const random = makeRng(seed + page.pageNumber * 7919);
     paintPaper(ctx, input.settings, page.coordinates, random);
-    if (input.settings.header.enabled) {
-      drawBand(ctx, input.settings.header, input.settings, page.coordinates, 0, page.pageNumber, totalPages, random);
+    const effectiveHeader = resolveEffectiveBand(input.settings, "header", page.pageNumber, totalPages);
+    if (effectiveHeader.enabled) {
+      drawBand(ctx, "header", effectiveHeader, input.settings, page.coordinates, 0, page.pageNumber, totalPages, random);
     }
-    if (input.settings.footer.enabled) {
+    const effectiveFooter = resolveEffectiveBand(input.settings, "footer", page.pageNumber, totalPages);
+    if (effectiveFooter.enabled) {
       drawBand(
         ctx,
-        input.settings.footer,
+        "footer",
+        effectiveFooter,
         input.settings,
         page.coordinates,
         page.coordinates.pageHeight - page.coordinates.footerHeight,

@@ -63,6 +63,37 @@ export interface BandConfig {
   elements: PageElement[];
 }
 
+export interface ElementOverride {
+  value?: string | undefined;
+  label?: string | undefined;
+  slot?: Slot | undefined;
+  row?: number | undefined;
+  fontSize?: number | undefined;
+  color?: string | undefined;
+  handwritten?: boolean | undefined;
+  enabled?: boolean | undefined;
+  format?: PageNumberFormat | undefined;
+}
+
+export interface BandOverride {
+  enabled?: boolean | undefined;
+  height?: number | undefined;
+  borderTop?: boolean | undefined;
+  borderBottom?: boolean | undefined;
+  borderColor?: string | undefined;
+  elementOverrides?: Record<string, ElementOverride> | undefined;
+  extraElements?: PageElement[] | undefined;
+  hiddenElementIds?: string[] | undefined;
+}
+
+export interface PageBandOverride {
+  header?: BandOverride | undefined;
+  footer?: BandOverride | undefined;
+}
+
+/** Sparse map of 1-indexed page number to page-specific overrides */
+export type PageOverridesMap = Record<number, PageBandOverride>;
+
 export type RulingType = "ruled" | "plain" | "dotted" | "graph" | "double" | "narrow" | "grid";
 
 export interface RulingConfig {
@@ -134,6 +165,7 @@ export interface HandwritingSettings {
   header: BandConfig;
   footer: BandConfig;
   table: TableStyle;
+  pageOverrides?: PageOverridesMap | undefined;
 }
 
 export interface HandwritingStyle {
@@ -287,10 +319,13 @@ export function newElement(kind: ElementKind, partial: Partial<PageElement> = {}
   };
 }
 
+export const STANDARD_HEADER_HEIGHT = 140;
+export const STANDARD_FOOTER_HEIGHT = 110;
+
 export const DEFAULT_HEADER: BandConfig = {
   enabled: false,
   applyTo: "all",
-  height: 140,
+  height: STANDARD_HEADER_HEIGHT,
   borderTop: false,
   borderBottom: true,
   borderColor: "#c9ced6",
@@ -300,7 +335,7 @@ export const DEFAULT_HEADER: BandConfig = {
 export const DEFAULT_FOOTER: BandConfig = {
   enabled: false,
   applyTo: "all",
-  height: 110,
+  height: STANDARD_FOOTER_HEIGHT,
   borderTop: true,
   borderBottom: false,
   borderColor: "#c9ced6",
@@ -353,6 +388,7 @@ export const DEFAULT_SETTINGS: HandwritingSettings = {
 export function withDefaults(partial: Partial<HandwritingSettings> | undefined): HandwritingSettings {
   const s = { ...DEFAULT_SETTINGS, ...(partial ?? {}) };
   const page = { ...DEFAULT_PAGE, ...(partial?.page ?? {}) };
+  const cleanedOverrides = cleanupPageOverrides(partial?.pageOverrides);
   return {
     ...s,
     page: {
@@ -363,7 +399,108 @@ export function withDefaults(partial: Partial<HandwritingSettings> | undefined):
     header: { ...DEFAULT_HEADER, ...(partial?.header ?? {}) },
     footer: { ...DEFAULT_FOOTER, ...(partial?.footer ?? {}) },
     table: { ...DEFAULT_TABLE, ...(partial?.table ?? {}) },
+    ...(cleanedOverrides ? { pageOverrides: cleanedOverrides } : {}),
   };
+}
+
+/**
+ * Resolves the effective BandConfig for a specific 1-indexed pageNumber by merging
+ * global defaults with sparse page-specific overrides.
+ */
+export function resolveEffectiveBand(
+  settings: HandwritingSettings,
+  which: "header" | "footer",
+  pageNumber: number,
+  totalPages: number,
+): BandConfig {
+  const globalBand = settings[which];
+  const pageOverride = settings.pageOverrides?.[pageNumber]?.[which];
+
+  if (!pageOverride) {
+    return globalBand;
+  }
+
+  const enabled = pageOverride.enabled !== undefined ? pageOverride.enabled : globalBand.enabled;
+  const height = pageOverride.height !== undefined ? pageOverride.height : globalBand.height;
+  const borderTop = pageOverride.borderTop !== undefined ? pageOverride.borderTop : globalBand.borderTop;
+  const borderBottom = pageOverride.borderBottom !== undefined ? pageOverride.borderBottom : globalBand.borderBottom;
+  const borderColor = pageOverride.borderColor !== undefined ? pageOverride.borderColor : globalBand.borderColor;
+
+  const hiddenIds = new Set(pageOverride.hiddenElementIds ?? []);
+  const elementOverrides = pageOverride.elementOverrides ?? {};
+
+  const mergedElements: PageElement[] = globalBand.elements
+    .filter((el) => !hiddenIds.has(el.id))
+    .map((el) => {
+      const override = elementOverrides[el.id];
+      if (!override) return el;
+      const patched = { ...el };
+      if (override.value !== undefined) patched.value = override.value;
+      if (override.label !== undefined) patched.label = override.label;
+      if (override.slot !== undefined) patched.slot = override.slot;
+      if (override.row !== undefined) patched.row = override.row;
+      if (override.fontSize !== undefined) patched.fontSize = override.fontSize;
+      if (override.color !== undefined) patched.color = override.color;
+      if (override.handwritten !== undefined) patched.handwritten = override.handwritten;
+      if (override.enabled !== undefined) patched.enabled = override.enabled;
+      if (override.format !== undefined) patched.format = override.format;
+      return patched;
+    });
+
+  if (pageOverride.extraElements && pageOverride.extraElements.length > 0) {
+    mergedElements.push(...pageOverride.extraElements);
+  }
+
+  return {
+    ...globalBand,
+    enabled,
+    height,
+    borderTop,
+    borderBottom,
+    borderColor,
+    elements: mergedElements,
+  };
+}
+
+/**
+ * Prunes empty overrides and cleans up empty page records to prevent payload bloat.
+ */
+export function cleanupPageOverrides(overrides?: PageOverridesMap): PageOverridesMap | undefined {
+  if (!overrides) return undefined;
+  const cleaned: PageOverridesMap = {};
+  let hasAny = false;
+
+  for (const [pageKey, pageRecord] of Object.entries(overrides)) {
+    const pageNum = Number(pageKey);
+    if (isNaN(pageNum) || !pageRecord) continue;
+
+    const pageCleaned: PageBandOverride = {};
+    let pageHasAny = false;
+
+    for (const which of ["header", "footer"] as const) {
+      const band = pageRecord[which];
+      if (!band) continue;
+
+      const hasEnabled = band.enabled !== undefined;
+      const hasHeight = band.height !== undefined;
+      const hasBorders = band.borderTop !== undefined || band.borderBottom !== undefined || band.borderColor !== undefined;
+      const hasElemOverrides = band.elementOverrides && Object.keys(band.elementOverrides).length > 0;
+      const hasExtra = band.extraElements && band.extraElements.length > 0;
+      const hasHidden = band.hiddenElementIds && band.hiddenElementIds.length > 0;
+
+      if (hasEnabled || hasHeight || hasBorders || hasElemOverrides || hasExtra || hasHidden) {
+        pageCleaned[which] = band;
+        pageHasAny = true;
+      }
+    }
+
+    if (pageHasAny) {
+      cleaned[pageNum] = pageCleaned;
+      hasAny = true;
+    }
+  }
+
+  return hasAny ? cleaned : undefined;
 }
 
 export const HANDWRITING_STYLES: HandwritingStyle[] = [

@@ -48,7 +48,8 @@ function Dashboard() {
   });
 
   const create = useMutation({
-    mutationFn: (name: string) => createProject(name.trim() || "Untitled answer", DEFAULT_SETTINGS),
+    mutationFn: (name: string) =>
+      createProject(name.trim() || "Untitled answer", DEFAULT_SETTINGS),
     onSuccess: (project) => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       navigate({ to: "/editor/$projectId", params: { projectId: project.id } });

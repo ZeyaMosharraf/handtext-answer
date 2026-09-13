@@ -61,8 +61,11 @@ export async function updateProject(
     .update(patch as unknown as never)
     .eq("id", id)
     .select("*")
-    .single();
+    .maybeSingle();
   if (error) throw error;
+  if (!data) {
+    throw new Error("Project not found or update permission denied");
+  }
   return normalise(data);
 }
 

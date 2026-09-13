@@ -2,6 +2,7 @@ import { parseContent, type Block, type BlockKind, type Seg } from "./parse";
 import {
   formatPageNumber,
   pageDimensions,
+  resolveEffectiveBand,
   type BandConfig,
   type HandwritingSettings,
   type PageElement,
@@ -238,11 +239,13 @@ function activeCoordinateSystem(
   const rulingSpacing = settings.fontSize * settings.lineSpacing;
 
   // Header geometry: align header boundary to master ruling lattice
-  const rawHeaderHeight = bandHeight(settings.header, pageNumber, totalPages);
+  const effectiveHeader = resolveEffectiveBand(settings, "header", pageNumber, totalPages);
+  const rawHeaderHeight = bandHeight(effectiveHeader, pageNumber, totalPages);
   const headerHeight = rawHeaderHeight > 0 ? Math.max(2, Math.round(rawHeaderHeight / rulingSpacing)) * rulingSpacing : 0;
 
   // Footer geometry: align footer boundary to master ruling lattice
-  const rawFooterHeight = bandHeight(settings.footer, pageNumber, totalPages);
+  const effectiveFooter = resolveEffectiveBand(settings, "footer", pageNumber, totalPages);
+  const rawFooterHeight = bandHeight(effectiveFooter, pageNumber, totalPages);
   const footerHeight = rawFooterHeight > 0 ? Math.max(1, Math.round(rawFooterHeight / rulingSpacing)) * rulingSpacing : 0;
 
   // Margin rule alignment

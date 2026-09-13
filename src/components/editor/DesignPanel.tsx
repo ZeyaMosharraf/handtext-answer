@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { ColorField } from "@/components/editor/ColorField";
@@ -16,17 +16,25 @@ import {
   PAPERS,
   PAPER_COLORS,
   RULING_COLORS,
+  STANDARD_FOOTER_HEIGHT,
+  STANDARD_HEADER_HEIGHT,
   applyTemplate,
+  cleanupPageOverrides,
   newElement,
+  resolveEffectiveBand,
   styleSettings,
   type ApplyTo,
   type BandConfig,
+  type BandOverride,
   type ElementKind,
+  type ElementOverride,
   type HandwritingSettings,
   type InkColor,
   type Orientation,
+  type PageBandOverride,
   type PageElement,
   type PageNumberFormat,
+  type PageOverridesMap,
   type PageSizeKey,
   type PaperKind,
   type Slot,
@@ -40,6 +48,8 @@ interface Props {
   templates: { id: string; name: string; settings: HandwritingSettings }[];
   onLoadTemplate: (id: string) => void;
   onDeleteTemplate: (id: string) => void;
+  currentPage?: number;
+  totalPages?: number;
 }
 
 type TabId = "handwriting" | "page" | "header" | "footer" | "tables" | "templates";
@@ -84,6 +94,8 @@ export function DesignPanel({
   templates,
   onLoadTemplate,
   onDeleteTemplate,
+  currentPage = 1,
+  totalPages = 1,
 }: Props) {
   const [tab, setTab] = useState<TabId>("handwriting");
   const [templateName, setTemplateName] = useState("");
@@ -417,11 +429,21 @@ export function DesignPanel({
         </div>
       )}
 
-      {(tab === "header" || tab === "footer") && (
-        <BandEditor
-          which={tab}
-          band={settings[tab]}
-          onChange={(patch) => setBand(tab, patch)}
+      {tab === "header" && (
+        <HeaderEditor
+          settings={settings}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onChange={onChange}
+        />
+      )}
+
+      {tab === "footer" && (
+        <FooterEditor
+          settings={settings}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onChange={onChange}
         />
       )}
 
@@ -561,211 +583,1121 @@ export function DesignPanel({
   );
 }
 
-/* ------------------------------- band editor ------------------------------ */
+/* ------------------------------ header editor ----------------------------- */
 
-function BandEditor({
-  which,
-  band,
+function getFieldPlaceholder(kind: ElementKind): string {
+  switch (kind) {
+    case "studentName":
+      return "Student / Name (or leave blank for line)";
+    case "subject":
+      return "Subject name";
+    case "date":
+      return "Date (or leave blank for line)";
+    case "enrollment":
+      return "Enrollment number";
+    case "courseCode":
+      return "Course name or code";
+    case "roll":
+      return "Roll number";
+    case "assignment":
+      return "Assignment name or number";
+    case "college":
+      return "College / University";
+    case "teacherName":
+      return "Teacher name";
+    case "signature":
+      return "Signature line (or leave blank)";
+    case "text":
+      return "Custom header text";
+    default:
+      return "Value";
+  }
+}
+
+function HeaderEditor({
+  settings,
+  currentPage,
+  totalPages,
   onChange,
 }: {
-  which: "header" | "footer";
-  band: BandConfig;
-  onChange: (patch: Partial<BandConfig>) => void;
+  settings: HandwritingSettings;
+  currentPage: number;
+  totalPages: number;
+  onChange: (nextSettings: HandwritingSettings) => void;
 }) {
-  const [kind, setKind] = useState<ElementKind>(which === "header" ? "date" : "pageNumber");
+  const [scope, setScope] = useState<"all" | "page">("all");
+  const [selectedKind, setSelectedKind] = useState<ElementKind>("studentName");
 
-  const updateElement = (id: string, patch: Partial<PageElement>) =>
-    onChange({ elements: band.elements.map((el) => (el.id === id ? { ...el, ...patch } : el)) });
+  const globalBand = settings.header;
+  const pageOverride: BandOverride | undefined = settings.pageOverrides?.[currentPage]?.header;
+
+  const hasOverride = Boolean(
+    pageOverride &&
+      (pageOverride.enabled !== undefined ||
+        (pageOverride.elementOverrides && Object.keys(pageOverride.elementOverrides).length > 0) ||
+        (pageOverride.extraElements && pageOverride.extraElements.length > 0) ||
+        (pageOverride.hiddenElementIds && pageOverride.hiddenElementIds.length > 0)),
+  );
+
+  const displayedBand =
+    scope === "all"
+      ? globalBand
+      : resolveEffectiveBand(settings, "header", currentPage, totalPages);
+
+  const updatePageOverride = (updater: (prev: BandOverride) => BandOverride) => {
+    const currentOverride = settings.pageOverrides?.[currentPage]?.header ?? {};
+    const updatedOverride = updater(currentOverride);
+
+    const hasContent =
+      updatedOverride.enabled !== undefined ||
+      updatedOverride.height !== undefined ||
+      updatedOverride.borderTop !== undefined ||
+      updatedOverride.borderBottom !== undefined ||
+      updatedOverride.borderColor !== undefined ||
+      (updatedOverride.elementOverrides && Object.keys(updatedOverride.elementOverrides).length > 0) ||
+      (updatedOverride.extraElements && updatedOverride.extraElements.length > 0) ||
+      (updatedOverride.hiddenElementIds && updatedOverride.hiddenElementIds.length > 0);
+
+    const nextOverrides: PageOverridesMap = { ...(settings.pageOverrides ?? {}) };
+    const currentPageRecord: PageBandOverride = { ...(nextOverrides[currentPage] ?? {}) };
+
+    if (hasContent) {
+      currentPageRecord.header = updatedOverride;
+      nextOverrides[currentPage] = currentPageRecord;
+    } else {
+      delete currentPageRecord.header;
+      if (Object.keys(currentPageRecord).length > 0) {
+        nextOverrides[currentPage] = currentPageRecord;
+      } else {
+        delete nextOverrides[currentPage];
+      }
+    }
+
+    const cleaned = cleanupPageOverrides(nextOverrides);
+    const nextSettings: HandwritingSettings = { ...settings };
+    if (cleaned) {
+      nextSettings.pageOverrides = cleaned;
+    } else {
+      delete nextSettings.pageOverrides;
+    }
+    onChange(nextSettings);
+  };
+
+  const handleToggleEnabled = (checked: boolean) => {
+    if (scope === "all") {
+      onChange({
+        ...settings,
+        header: {
+          ...globalBand,
+          enabled: checked,
+          height: globalBand.height && globalBand.height > 0 ? globalBand.height : STANDARD_HEADER_HEIGHT,
+          borderBottom: globalBand.borderBottom !== undefined ? globalBand.borderBottom : true,
+          borderColor: globalBand.borderColor || "#c9ced6",
+        },
+      });
+    } else {
+      updatePageOverride((prev) => {
+        if (checked === globalBand.enabled) {
+          const { enabled: _e, ...rest } = prev;
+          return rest;
+        }
+        return { ...prev, enabled: checked };
+      });
+    }
+  };
+
+  const handleAddElement = () => {
+    const isRight = selectedKind === "date" || selectedKind === "pageNumber" || selectedKind === "signature";
+    const slot: Slot = isRight ? "right" : "left";
+    const existingInSlot = displayedBand.elements.filter((e) => (isRight ? e.slot === "right" : e.slot !== "right"));
+    const row = existingInSlot.length;
+    const newEl = newElement(selectedKind, {
+      slot,
+      row,
+      fontSize: 20,
+      color: "#333333",
+      handwritten: false,
+      enabled: true,
+      ...(selectedKind === "pageNumber" ? { format: "n", label: "Page No." } : {}),
+    });
+
+    if (scope === "all") {
+      onChange({
+        ...settings,
+        header: {
+          ...globalBand,
+          enabled: true,
+          height: globalBand.height && globalBand.height > 0 ? globalBand.height : STANDARD_HEADER_HEIGHT,
+          borderBottom: globalBand.borderBottom !== undefined ? globalBand.borderBottom : true,
+          elements: [...globalBand.elements, newEl],
+        },
+      });
+    } else {
+      updatePageOverride((prev) => {
+        const extra = [...(prev.extraElements ?? []), newEl];
+        return {
+          ...prev,
+          enabled: prev.enabled !== undefined ? prev.enabled : (globalBand.enabled ? undefined : true),
+          extraElements: extra,
+        };
+      });
+    }
+  };
+
+  const handleDeleteElement = (id: string) => {
+    if (scope === "all") {
+      onChange({
+        ...settings,
+        header: {
+          ...globalBand,
+          elements: globalBand.elements.filter((x) => x.id !== id),
+        },
+      });
+    } else {
+      updatePageOverride((prev) => {
+        const isExtra = prev.extraElements?.some((e) => e.id === id);
+        if (isExtra) {
+          const nextExtra = prev.extraElements?.filter((e) => e.id !== id);
+          return {
+            ...prev,
+            extraElements: nextExtra && nextExtra.length > 0 ? nextExtra : undefined,
+          };
+        }
+
+        const hidden = new Set(prev.hiddenElementIds ?? []);
+        hidden.add(id);
+
+        const nextElemOverrides = { ...(prev.elementOverrides ?? {}) };
+        delete nextElemOverrides[id];
+
+        return {
+          ...prev,
+          hiddenElementIds: Array.from(hidden),
+          elementOverrides: Object.keys(nextElemOverrides).length > 0 ? nextElemOverrides : undefined,
+        };
+      });
+    }
+  };
+
+  const handleMoveElement = (id: string, direction: "up" | "down") => {
+    const currentElements = [...displayedBand.elements];
+    const idx = currentElements.findIndex((e) => e.id === id);
+    if (idx === -1) return;
+    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= currentElements.length) return;
+
+    const currentEl = currentElements[idx];
+    const targetEl = currentElements[targetIdx];
+    if (!currentEl || !targetEl) return;
+    currentElements[idx] = targetEl;
+    currentElements[targetIdx] = currentEl;
+
+    let leftCount = 0;
+    let rightCount = 0;
+    const normalized = currentElements.map((el) => {
+      if (el.slot === "right") {
+        return { ...el, row: rightCount++ };
+      } else {
+        return { ...el, row: leftCount++ };
+      }
+    });
+
+    if (scope === "all") {
+      onChange({
+        ...settings,
+        header: {
+          ...globalBand,
+          elements: normalized,
+        },
+      });
+    } else {
+      updatePageOverride((prev) => {
+        const extraIds = new Set(prev.extraElements?.map((e) => e.id) ?? []);
+        const nextExtra = (prev.extraElements ?? []).map((extraEl) => {
+          const norm = normalized.find((e) => e.id === extraEl.id);
+          return norm ? { ...extraEl, row: norm.row } : extraEl;
+        });
+
+        const nextOverrides = { ...(prev.elementOverrides ?? {}) };
+        for (const el of normalized) {
+          if (!extraIds.has(el.id)) {
+            const globalEl = globalBand.elements.find((g) => g.id === el.id);
+            const currentElOverride = nextOverrides[el.id];
+            if (globalEl && globalEl.row !== el.row) {
+              nextOverrides[el.id] = { ...(currentElOverride ?? {}), row: el.row };
+            } else if (currentElOverride) {
+              const { row: _r, ...rest } = currentElOverride;
+              if (Object.keys(rest).length > 0) {
+                nextOverrides[el.id] = rest;
+              } else {
+                delete nextOverrides[el.id];
+              }
+            }
+          }
+        }
+
+        return {
+          ...prev,
+          extraElements: nextExtra.length > 0 ? nextExtra : undefined,
+          elementOverrides: Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined,
+        };
+      });
+    }
+  };
+
+  const handleUpdateElement = (id: string, patch: Partial<PageElement>) => {
+    if (scope === "all") {
+      onChange({
+        ...settings,
+        header: {
+          ...globalBand,
+          elements: globalBand.elements.map((el) => (el.id === id ? { ...el, ...patch } : el)),
+        },
+      });
+    } else {
+      updatePageOverride((prev) => {
+        const isExtra = prev.extraElements?.some((e) => e.id === id);
+        if (isExtra) {
+          const nextExtra = (prev.extraElements ?? []).map((e) => (e.id === id ? { ...e, ...patch } : e));
+          return { ...prev, extraElements: nextExtra };
+        }
+
+        const globalEl = globalBand.elements.find((e) => e.id === id);
+        if (!globalEl) return prev;
+
+        const currentElemOverride = prev.elementOverrides?.[id] ?? {};
+        const nextElemOverride: ElementOverride = { ...currentElemOverride, ...patch };
+
+        for (const key of Object.keys(nextElemOverride) as (keyof ElementOverride)[]) {
+          if (nextElemOverride[key] === (globalEl as any)[key]) {
+            delete nextElemOverride[key];
+          }
+        }
+
+        const nextElemOverrides = { ...(prev.elementOverrides ?? {}) };
+        if (Object.keys(nextElemOverride).length > 0) {
+          nextElemOverrides[id] = nextElemOverride;
+        } else {
+          delete nextElemOverrides[id];
+        }
+
+        return {
+          ...prev,
+          elementOverrides: Object.keys(nextElemOverrides).length > 0 ? nextElemOverrides : undefined,
+        };
+      });
+    }
+  };
+
+  const handleResetToGlobal = () => {
+    if (!settings.pageOverrides?.[currentPage]?.header) return;
+
+    const nextOverrides: PageOverridesMap = { ...(settings.pageOverrides ?? {}) };
+    const currentPageRecord: PageBandOverride = { ...(nextOverrides[currentPage] ?? {}) };
+    delete currentPageRecord.header;
+
+    if (Object.keys(currentPageRecord).length > 0) {
+      nextOverrides[currentPage] = currentPageRecord;
+    } else {
+      delete nextOverrides[currentPage];
+    }
+
+    const cleaned = cleanupPageOverrides(nextOverrides);
+    const nextSettings: HandwritingSettings = { ...settings };
+    if (cleaned) {
+      nextSettings.pageOverrides = cleaned;
+    } else {
+      delete nextSettings.pageOverrides;
+    }
+    onChange(nextSettings);
+  };
+
+  const handleRestoreHiddenElement = (hiddenId: string) => {
+    updatePageOverride((prev) => {
+      const nextHidden = prev.hiddenElementIds?.filter((id) => id !== hiddenId);
+      return {
+        ...prev,
+        hiddenElementIds: nextHidden && nextHidden.length > 0 ? nextHidden : undefined,
+      };
+    });
+  };
 
   return (
     <div className="space-y-4">
       <Card className="space-y-4 p-4">
-        <label className="flex items-center gap-2 text-sm font-medium">
+        <div className="space-y-1.5">
+          <label htmlFor="header-scope" className="text-xs font-medium text-muted-foreground">
+            Apply to
+          </label>
+          <Select
+            id="header-scope"
+            value={scope}
+            onChange={(e) => setScope(e.target.value as "all" | "page")}
+          >
+            <option value="all">Every page (Global)</option>
+            <option value="page">This page · Page {currentPage}</option>
+          </Select>
+        </div>
+
+        {scope === "page" &&
+          (hasOverride ? (
+            <div className="flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2 border border-amber-500/25 text-xs">
+              <div className="flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
+                <Sparkles className="size-3.5" />
+                <span>Custom for Page {currentPage}</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-muted-foreground hover:text-foreground hover:bg-amber-500/20"
+                onClick={handleResetToGlobal}
+              >
+                <RotateCcw className="mr-1 size-3" />
+                Reset to global
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+              <span>Inheriting global defaults</span>
+              <span className="text-[10px] text-muted-foreground/80">Edits will customize this page</span>
+            </div>
+          ))}
+
+        {scope === "all" && hasOverride && (
+          <div className="rounded-lg bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+            Note: Page {currentPage} has custom overrides. Changes here update document defaults.
+          </div>
+        )}
+
+        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
           <input
             type="checkbox"
             className="size-4 accent-primary"
-            checked={band.enabled}
-            onChange={(e) => onChange({ enabled: e.target.checked })}
+            checked={displayedBand.enabled}
+            onChange={(e) => handleToggleEnabled(e.target.checked)}
           />
-          Enable {which}
+          <span>Show header {scope === "page" ? `on Page ${currentPage}` : ""}</span>
         </label>
+      </Card>
+
+      {displayedBand.enabled && (
+        <Card className="space-y-4 p-4">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-semibold">Fields</Label>
+            {scope === "page" && (
+              <span className="text-[11px] text-muted-foreground">
+                Page {currentPage} fields
+              </span>
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <Select
+              id="header-add-field-select"
+              aria-label="Select field type to add"
+              value={selectedKind}
+              onChange={(e) => setSelectedKind(e.target.value as ElementKind)}
+              className="flex-1 text-xs"
+            >
+              {ELEMENT_KINDS.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.label}
+                </option>
+              ))}
+            </Select>
+            <Button variant="secondary" size="sm" onClick={handleAddElement} className="text-xs shrink-0">
+              <Plus className="mr-1 size-3.5" />
+              Add field
+            </Button>
+          </div>
+
+          {scope === "page" && pageOverride?.hiddenElementIds && pageOverride.hiddenElementIds.length > 0 && (
+            <div className="rounded-lg border border-dashed border-border p-2.5 space-y-1.5 text-xs text-muted-foreground">
+              <div className="font-medium text-foreground">Hidden on Page {currentPage}:</div>
+              <div className="flex flex-wrap gap-1.5">
+                {pageOverride.hiddenElementIds.map((hiddenId) => {
+                  const orig = globalBand.elements.find((e) => e.id === hiddenId);
+                  const name = orig?.label || ELEMENT_KINDS.find((k) => k.id === orig?.kind)?.label || "Field";
+                  return (
+                    <button
+                      key={hiddenId}
+                      type="button"
+                      onClick={() => handleRestoreHiddenElement(hiddenId)}
+                      className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs font-medium hover:bg-accent text-foreground transition-colors"
+                    >
+                      <span>{name}</span>
+                      <span className="text-primary font-bold">↺ Restore</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {displayedBand.elements.length === 0 ? (
+            <p className="text-xs text-muted-foreground py-2 text-center">
+              No fields in header yet. Select a field above and click Add field.
+            </p>
+          ) : (
+            <ul className="space-y-2.5">
+              {displayedBand.elements.map((el, index) => {
+                const isExtra = scope === "page" && Boolean(pageOverride?.extraElements?.some((e) => e.id === el.id));
+                const hasDelta = scope === "page" && Boolean(pageOverride?.elementOverrides?.[el.id]);
+                const kindDef = ELEMENT_KINDS.find((k) => k.id === el.kind);
+                const isFirst = index === 0;
+                const isLast = index === displayedBand.elements.length - 1;
+
+                return (
+                  <li key={el.id} className="rounded-lg border border-border bg-card p-3 space-y-2 transition-colors">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xs font-semibold text-foreground truncate">
+                          {kindDef?.label ?? el.label ?? "Field"}
+                        </span>
+                        {isExtra && (
+                          <span className="rounded bg-primary/10 px-1.5 py-0.2 text-[9px] font-medium text-primary">
+                            page extra
+                          </span>
+                        )}
+                        {hasDelta && (
+                          <span className="rounded bg-amber-500/10 px-1.5 py-0.2 text-[9px] font-medium text-amber-600 dark:text-amber-400">
+                            custom
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                          disabled={isFirst}
+                          aria-label={`Move ${kindDef?.label ?? el.label} up`}
+                          onClick={() => handleMoveElement(el.id, "up")}
+                        >
+                          <ChevronUp className="size-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                          disabled={isLast}
+                          aria-label={`Move ${kindDef?.label ?? el.label} down`}
+                          onClick={() => handleMoveElement(el.id, "down")}
+                        >
+                          <ChevronDown className="size-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                          aria-label={`Remove ${kindDef?.label ?? el.label}`}
+                          onClick={() => handleDeleteElement(el.id)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Field value or format input */}
+                    {el.kind === "pageNumber" ? (
+                      <div className="space-y-1">
+                        <label htmlFor={`field-format-${el.id}`} className="text-[11px] text-muted-foreground">
+                          Number format
+                        </label>
+                        <Select
+                          id={`field-format-${el.id}`}
+                          aria-label="Page number format"
+                          value={el.format ?? "n"}
+                          onChange={(e) => handleUpdateElement(el.id, { format: e.target.value as PageNumberFormat })}
+                          className="text-xs h-8"
+                        >
+                          {PAGE_NUMBER_FORMATS.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <Input
+                          id={`field-val-${el.id}`}
+                          value={el.value}
+                          aria-label={`${kindDef?.label ?? el.label} value`}
+                          placeholder={getFieldPlaceholder(el.kind)}
+                          onChange={(e) => handleUpdateElement(el.id, { value: e.target.value })}
+                          className="text-xs h-8"
+                        />
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------ footer editor ----------------------------- */
+
+function getFooterFieldPlaceholder(kind: ElementKind): string {
+  switch (kind) {
+    case "text":
+      return "Custom footer text (e.g. Confidential Examination Script)";
+    case "date":
+      return "Date (or leave blank for line)";
+    case "studentName":
+      return "Student / Name (or leave blank for line)";
+    case "subject":
+      return "Subject name";
+    case "enrollment":
+      return "Enrollment number";
+    case "courseCode":
+      return "Course name or code";
+    case "roll":
+      return "Roll number";
+    case "signature":
+      return "Signature line (or leave blank)";
+    case "teacherName":
+      return "Teacher name";
+    case "college":
+      return "College / University";
+    case "assignment":
+      return "Assignment name or number";
+    default:
+      return "Value";
+  }
+}
+
+function FooterEditor({
+  settings,
+  currentPage,
+  totalPages,
+  onChange,
+}: {
+  settings: HandwritingSettings;
+  currentPage: number;
+  totalPages: number;
+  onChange: (nextSettings: HandwritingSettings) => void;
+}) {
+  const [scope, setScope] = useState<"all" | "page">("all");
+  const [selectedKind, setSelectedKind] = useState<ElementKind>("pageNumber");
+
+  const globalBand = settings.footer;
+  const pageOverride: BandOverride | undefined = settings.pageOverrides?.[currentPage]?.footer;
+
+  const hasOverride = Boolean(
+    pageOverride &&
+      (pageOverride.enabled !== undefined ||
+        (pageOverride.elementOverrides && Object.keys(pageOverride.elementOverrides).length > 0) ||
+        (pageOverride.extraElements && pageOverride.extraElements.length > 0) ||
+        (pageOverride.hiddenElementIds && pageOverride.hiddenElementIds.length > 0)),
+  );
+
+  const displayedBand =
+    scope === "all"
+      ? globalBand
+      : resolveEffectiveBand(settings, "footer", currentPage, totalPages);
+
+  const updatePageOverride = (updater: (prev: BandOverride) => BandOverride) => {
+    const currentOverride = settings.pageOverrides?.[currentPage]?.footer ?? {};
+    const updatedOverride = updater(currentOverride);
+
+    const hasContent =
+      updatedOverride.enabled !== undefined ||
+      updatedOverride.height !== undefined ||
+      updatedOverride.borderTop !== undefined ||
+      updatedOverride.borderBottom !== undefined ||
+      updatedOverride.borderColor !== undefined ||
+      (updatedOverride.elementOverrides && Object.keys(updatedOverride.elementOverrides).length > 0) ||
+      (updatedOverride.extraElements && updatedOverride.extraElements.length > 0) ||
+      (updatedOverride.hiddenElementIds && updatedOverride.hiddenElementIds.length > 0);
+
+    const nextOverrides: PageOverridesMap = { ...(settings.pageOverrides ?? {}) };
+    const currentPageRecord: PageBandOverride = { ...(nextOverrides[currentPage] ?? {}) };
+
+    if (hasContent) {
+      currentPageRecord.footer = updatedOverride;
+      nextOverrides[currentPage] = currentPageRecord;
+    } else {
+      delete currentPageRecord.footer;
+      if (Object.keys(currentPageRecord).length > 0) {
+        nextOverrides[currentPage] = currentPageRecord;
+      } else {
+        delete nextOverrides[currentPage];
+      }
+    }
+
+    const cleaned = cleanupPageOverrides(nextOverrides);
+    const nextSettings: HandwritingSettings = { ...settings };
+    if (cleaned) {
+      nextSettings.pageOverrides = cleaned;
+    } else {
+      delete nextSettings.pageOverrides;
+    }
+    onChange(nextSettings);
+  };
+
+  const handleToggleEnabled = (checked: boolean) => {
+    if (scope === "all") {
+      onChange({
+        ...settings,
+        footer: {
+          ...globalBand,
+          enabled: checked,
+          height: globalBand.height && globalBand.height > 0 ? globalBand.height : STANDARD_FOOTER_HEIGHT,
+          borderTop: globalBand.borderTop !== undefined ? globalBand.borderTop : true,
+          borderColor: globalBand.borderColor || "#c9ced6",
+        },
+      });
+    } else {
+      updatePageOverride((prev) => {
+        if (checked === globalBand.enabled) {
+          const { enabled: _e, ...rest } = prev;
+          return rest;
+        }
+        return { ...prev, enabled: checked };
+      });
+    }
+  };
+
+  const handleAddElement = () => {
+    const isRight = selectedKind === "pageNumber" || selectedKind === "date" || selectedKind === "signature";
+    const slot: Slot = isRight ? "right" : "left";
+    const existingInSlot = displayedBand.elements.filter((e) => (isRight ? e.slot === "right" : e.slot !== "right"));
+    const row = existingInSlot.length;
+    const newEl = newElement(selectedKind, {
+      slot,
+      row,
+      fontSize: 18,
+      color: "#333333",
+      handwritten: false,
+      enabled: true,
+      ...(selectedKind === "pageNumber" ? { format: "n", label: "Page No." } : {}),
+      ...(selectedKind === "text" ? { label: "", value: "Custom text" } : {}),
+    });
+
+    if (scope === "all") {
+      onChange({
+        ...settings,
+        footer: {
+          ...globalBand,
+          enabled: true,
+          height: globalBand.height && globalBand.height > 0 ? globalBand.height : STANDARD_FOOTER_HEIGHT,
+          borderTop: globalBand.borderTop !== undefined ? globalBand.borderTop : true,
+          elements: [...globalBand.elements, newEl],
+        },
+      });
+    } else {
+      updatePageOverride((prev) => {
+        const extra = [...(prev.extraElements ?? []), newEl];
+        return {
+          ...prev,
+          enabled: prev.enabled !== undefined ? prev.enabled : (globalBand.enabled ? undefined : true),
+          extraElements: extra,
+        };
+      });
+    }
+  };
+
+  const handleDeleteElement = (id: string) => {
+    if (scope === "all") {
+      onChange({
+        ...settings,
+        footer: {
+          ...globalBand,
+          elements: globalBand.elements.filter((x) => x.id !== id),
+        },
+      });
+    } else {
+      updatePageOverride((prev) => {
+        const isExtra = prev.extraElements?.some((e) => e.id === id);
+        if (isExtra) {
+          const nextExtra = prev.extraElements?.filter((e) => e.id !== id);
+          return {
+            ...prev,
+            extraElements: nextExtra && nextExtra.length > 0 ? nextExtra : undefined,
+          };
+        }
+
+        const hidden = new Set(prev.hiddenElementIds ?? []);
+        hidden.add(id);
+
+        const nextElemOverrides = { ...(prev.elementOverrides ?? {}) };
+        delete nextElemOverrides[id];
+
+        return {
+          ...prev,
+          hiddenElementIds: Array.from(hidden),
+          elementOverrides: Object.keys(nextElemOverrides).length > 0 ? nextElemOverrides : undefined,
+        };
+      });
+    }
+  };
+
+  const handleMoveElement = (id: string, direction: "up" | "down") => {
+    const currentElements = [...displayedBand.elements];
+    const idx = currentElements.findIndex((e) => e.id === id);
+    if (idx === -1) return;
+    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= currentElements.length) return;
+
+    const currentEl = currentElements[idx];
+    const targetEl = currentElements[targetIdx];
+    if (!currentEl || !targetEl) return;
+    currentElements[idx] = targetEl;
+    currentElements[targetIdx] = currentEl;
+
+    let leftCount = 0;
+    let rightCount = 0;
+    const normalized = currentElements.map((el) => {
+      if (el.slot === "right") {
+        return { ...el, row: rightCount++ };
+      } else {
+        return { ...el, row: leftCount++ };
+      }
+    });
+
+    if (scope === "all") {
+      onChange({
+        ...settings,
+        footer: {
+          ...globalBand,
+          elements: normalized,
+        },
+      });
+    } else {
+      updatePageOverride((prev) => {
+        const extraIds = new Set(prev.extraElements?.map((e) => e.id) ?? []);
+        const nextExtra = (prev.extraElements ?? []).map((extraEl) => {
+          const norm = normalized.find((e) => e.id === extraEl.id);
+          return norm ? { ...extraEl, row: norm.row } : extraEl;
+        });
+
+        const nextOverrides = { ...(prev.elementOverrides ?? {}) };
+        for (const el of normalized) {
+          if (!extraIds.has(el.id)) {
+            const globalEl = globalBand.elements.find((g) => g.id === el.id);
+            const currentElOverride = nextOverrides[el.id];
+            if (globalEl && globalEl.row !== el.row) {
+              nextOverrides[el.id] = { ...(currentElOverride ?? {}), row: el.row };
+            } else if (currentElOverride) {
+              const { row: _r, ...rest } = currentElOverride;
+              if (Object.keys(rest).length > 0) {
+                nextOverrides[el.id] = rest;
+              } else {
+                delete nextOverrides[el.id];
+              }
+            }
+          }
+        }
+
+        return {
+          ...prev,
+          extraElements: nextExtra.length > 0 ? nextExtra : undefined,
+          elementOverrides: Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined,
+        };
+      });
+    }
+  };
+
+  const handleUpdateElement = (id: string, patch: Partial<PageElement>) => {
+    if (scope === "all") {
+      onChange({
+        ...settings,
+        footer: {
+          ...globalBand,
+          elements: globalBand.elements.map((el) => (el.id === id ? { ...el, ...patch } : el)),
+        },
+      });
+    } else {
+      updatePageOverride((prev) => {
+        const isExtra = prev.extraElements?.some((e) => e.id === id);
+        if (isExtra) {
+          const nextExtra = (prev.extraElements ?? []).map((e) => (e.id === id ? { ...e, ...patch } : e));
+          return { ...prev, extraElements: nextExtra };
+        }
+
+        const globalEl = globalBand.elements.find((e) => e.id === id);
+        if (!globalEl) return prev;
+
+        const currentElemOverride = prev.elementOverrides?.[id] ?? {};
+        const nextElemOverride: ElementOverride = { ...currentElemOverride, ...patch };
+
+        for (const key of Object.keys(nextElemOverride) as (keyof ElementOverride)[]) {
+          if (nextElemOverride[key] === (globalEl as any)[key]) {
+            delete nextElemOverride[key];
+          }
+        }
+
+        const nextElemOverrides = { ...(prev.elementOverrides ?? {}) };
+        if (Object.keys(nextElemOverride).length > 0) {
+          nextElemOverrides[id] = nextElemOverride;
+        } else {
+          delete nextElemOverrides[id];
+        }
+
+        return {
+          ...prev,
+          elementOverrides: Object.keys(nextElemOverrides).length > 0 ? nextElemOverrides : undefined,
+        };
+      });
+    }
+  };
+
+  const handleResetToGlobal = () => {
+    if (!settings.pageOverrides?.[currentPage]?.footer) return;
+
+    const nextOverrides: PageOverridesMap = { ...(settings.pageOverrides ?? {}) };
+    const currentPageRecord: PageBandOverride = { ...(nextOverrides[currentPage] ?? {}) };
+    delete currentPageRecord.footer;
+
+    if (Object.keys(currentPageRecord).length > 0) {
+      nextOverrides[currentPage] = currentPageRecord;
+    } else {
+      delete nextOverrides[currentPage];
+    }
+
+    const cleaned = cleanupPageOverrides(nextOverrides);
+    const nextSettings: HandwritingSettings = { ...settings };
+    if (cleaned) {
+      nextSettings.pageOverrides = cleaned;
+    } else {
+      delete nextSettings.pageOverrides;
+    }
+    onChange(nextSettings);
+  };
+
+  const handleRestoreHiddenElement = (hiddenId: string) => {
+    updatePageOverride((prev) => {
+      const nextHidden = prev.hiddenElementIds?.filter((id) => id !== hiddenId);
+      return {
+        ...prev,
+        hiddenElementIds: nextHidden && nextHidden.length > 0 ? nextHidden : undefined,
+      };
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="space-y-4 p-4">
         <div className="space-y-1.5">
-          <label htmlFor={`${which}-apply`} className="text-xs font-medium text-muted-foreground">
+          <label htmlFor="footer-scope" className="text-xs font-medium text-muted-foreground">
             Apply to
           </label>
-          <Select id={`${which}-apply`} value={band.applyTo} onChange={(e) => onChange({ applyTo: e.target.value as ApplyTo })}>
-            <option value="all">Every page</option>
-            <option value="first">First page only</option>
-            <option value="last">Last page only</option>
-          </Select>
-        </div>
-        <Slider
-          label={`${which === "header" ? "Header" : "Footer"} height`}
-          min={60}
-          max={340}
-          step={5}
-          value={band.height}
-          onChange={(e) => onChange({ height: Number(e.target.value) })}
-          suffix="px"
-        />
-        <div className="flex gap-4 text-sm">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              className="size-4 accent-primary"
-              checked={band.borderTop}
-              onChange={(e) => onChange({ borderTop: e.target.checked })}
-            />
-            Top border
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              className="size-4 accent-primary"
-              checked={band.borderBottom}
-              onChange={(e) => onChange({ borderBottom: e.target.checked })}
-            />
-            Bottom border
-          </label>
-        </div>
-        <ColorField label="Border colour" value={band.borderColor} onChange={(hex) => onChange({ borderColor: hex })} />
-      </Card>
-
-      <Card className="space-y-3 p-4">
-        <Label>Fields</Label>
-        <div className="flex gap-2">
-          <Select aria-label="Field type" value={kind} onChange={(e) => setKind(e.target.value as ElementKind)}>
-            {ELEMENT_KINDS.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.label}
-              </option>
-            ))}
-          </Select>
-          <Button
-            variant="secondary"
-            onClick={() =>
-              onChange({
-                enabled: true,
-                elements: [...band.elements, newElement(kind)],
-              })
-            }
+          <Select
+            id="footer-scope"
+            value={scope}
+            onChange={(e) => setScope(e.target.value as "all" | "page")}
           >
-            <Plus className="size-4" />
-            Add
-          </Button>
+            <option value="all">Every page (Global)</option>
+            <option value="page">This page · Page {currentPage}</option>
+          </Select>
         </div>
 
-        {band.elements.length === 0 && (
-          <p className="text-xs text-muted-foreground">No fields yet — select a field type and click Add.</p>
+        {scope === "page" &&
+          (hasOverride ? (
+            <div className="flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2 border border-amber-500/25 text-xs">
+              <div className="flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
+                <Sparkles className="size-3.5" />
+                <span>Custom for Page {currentPage}</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-muted-foreground hover:text-foreground hover:bg-amber-500/20"
+                onClick={handleResetToGlobal}
+              >
+                <RotateCcw className="mr-1 size-3" />
+                Reset to global
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+              <span>Inheriting global defaults</span>
+              <span className="text-[10px] text-muted-foreground/80">Edits will customize this page</span>
+            </div>
+          ))}
+
+        {scope === "all" && hasOverride && (
+          <div className="rounded-lg bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+            Note: Page {currentPage} has custom overrides. Changes here update document defaults.
+          </div>
         )}
 
-        <ul className="space-y-3">
-          {band.elements.map((el) => (
-            <li key={el.id} className="space-y-2 rounded-lg border border-border p-3">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  className="size-4 accent-primary"
-                  aria-label={`Show ${el.label || el.kind}`}
-                  checked={el.enabled}
-                  onChange={(e) => updateElement(el.id, { enabled: e.target.checked })}
-                />
-                <span className="flex-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {ELEMENT_KINDS.find((k) => k.id === el.kind)?.label}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Delete field"
-                  onClick={() => onChange({ elements: band.elements.filter((x) => x.id !== el.id) })}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-              </div>
-
-              {el.kind === "pageNumber" ? (
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    value={el.label}
-                    aria-label="Field label"
-                    placeholder="Label (e.g. Page No.)"
-                    onChange={(e) => updateElement(el.id, { label: e.target.value })}
-                  />
-                  <Select
-                    aria-label="Page number format"
-                    value={el.format ?? "n"}
-                    onChange={(e) => updateElement(el.id, { format: e.target.value as PageNumberFormat })}
-                  >
-                    {PAGE_NUMBER_FORMATS.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.label}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    value={el.label}
-                    aria-label="Field label"
-                    placeholder="Label"
-                    onChange={(e) => updateElement(el.id, { label: e.target.value })}
-                  />
-                  <Input
-                    value={el.value}
-                    aria-label="Field value"
-                    placeholder="Value (optional)"
-                    onChange={(e) => updateElement(el.id, { value: e.target.value })}
-                  />
-                </div>
-              )}
-
-              <div className="grid grid-cols-3 gap-2">
-                <Select aria-label="Alignment" value={el.slot} onChange={(e) => updateElement(el.id, { slot: e.target.value as Slot })}>
-                  <option value="left">Left</option>
-                  <option value="center">Center</option>
-                  <option value="right">Right</option>
-                </Select>
-                <Select aria-label="Row" value={String(el.row)} onChange={(e) => updateElement(el.id, { row: Number(e.target.value) })}>
-                  {[0, 1, 2, 3].map((r) => (
-                    <option key={r} value={r}>
-                      Row {r + 1}
-                    </option>
-                  ))}
-                </Select>
-                <Select aria-label="Show on" value={el.applyTo} onChange={(e) => updateElement(el.id, { applyTo: e.target.value as ApplyTo })}>
-                  <option value="all">All pages</option>
-                  <option value="first">First page</option>
-                  <option value="last">Last page</option>
-                </Select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <Slider
-                  label="Size"
-                  min={14}
-                  max={40}
-                  step={1}
-                  value={el.fontSize}
-                  onChange={(e) => updateElement(el.id, { fontSize: Number(e.target.value) })}
-                  suffix="px"
-                />
-                <ColorField label="Colour" value={el.color} onChange={(hex) => updateElement(el.id, { color: hex })} />
-              </div>
-
-              <label className="flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  className="size-4 accent-primary"
-                  checked={el.handwritten}
-                  onChange={(e) => updateElement(el.id, { handwritten: e.target.checked })}
-                />
-                Handwritten
-              </label>
-            </li>
-          ))}
-        </ul>
+        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+          <input
+            type="checkbox"
+            className="size-4 accent-primary"
+            checked={displayedBand.enabled}
+            onChange={(e) => handleToggleEnabled(e.target.checked)}
+          />
+          <span>Show footer {scope === "page" ? `on Page ${currentPage}` : ""}</span>
+        </label>
       </Card>
+
+      {displayedBand.enabled && (
+        <Card className="space-y-4 p-4">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-semibold">Fields</Label>
+            {scope === "page" && (
+              <span className="text-[11px] text-muted-foreground">
+                Page {currentPage} fields
+              </span>
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <Select
+              id="footer-add-field-select"
+              aria-label="Select field type to add"
+              value={selectedKind}
+              onChange={(e) => setSelectedKind(e.target.value as ElementKind)}
+              className="flex-1 text-xs"
+            >
+              {ELEMENT_KINDS.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.label}
+                </option>
+              ))}
+            </Select>
+            <Button variant="secondary" size="sm" onClick={handleAddElement} className="text-xs shrink-0">
+              <Plus className="mr-1 size-3.5" />
+              Add field
+            </Button>
+          </div>
+
+          {scope === "page" && pageOverride?.hiddenElementIds && pageOverride.hiddenElementIds.length > 0 && (
+            <div className="rounded-lg border border-dashed border-border p-2.5 space-y-1.5 text-xs text-muted-foreground">
+              <div className="font-medium text-foreground">Hidden on Page {currentPage}:</div>
+              <div className="flex flex-wrap gap-1.5">
+                {pageOverride.hiddenElementIds.map((hiddenId) => {
+                  const orig = globalBand.elements.find((e) => e.id === hiddenId);
+                  const name = orig?.label || ELEMENT_KINDS.find((k) => k.id === orig?.kind)?.label || "Field";
+                  return (
+                    <button
+                      key={hiddenId}
+                      type="button"
+                      onClick={() => handleRestoreHiddenElement(hiddenId)}
+                      className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs font-medium hover:bg-accent text-foreground transition-colors"
+                    >
+                      <span>{name}</span>
+                      <span className="text-primary font-bold">↺ Restore</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {displayedBand.elements.length === 0 ? (
+            <p className="text-xs text-muted-foreground py-2 text-center">
+              No fields in footer yet. Select a field above and click Add field.
+            </p>
+          ) : (
+            <ul className="space-y-2.5">
+              {displayedBand.elements.map((el, index) => {
+                const isExtra = scope === "page" && Boolean(pageOverride?.extraElements?.some((e) => e.id === el.id));
+                const hasDelta = scope === "page" && Boolean(pageOverride?.elementOverrides?.[el.id]);
+                const kindDef = ELEMENT_KINDS.find((k) => k.id === el.kind);
+                const isFirst = index === 0;
+                const isLast = index === displayedBand.elements.length - 1;
+
+                return (
+                  <li key={el.id} className="rounded-lg border border-border bg-card p-3 space-y-2 transition-colors">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xs font-semibold text-foreground truncate">
+                          {kindDef?.label ?? el.label ?? "Field"}
+                        </span>
+                        {isExtra && (
+                          <span className="rounded bg-primary/10 px-1.5 py-0.2 text-[9px] font-medium text-primary">
+                            page extra
+                          </span>
+                        )}
+                        {hasDelta && (
+                          <span className="rounded bg-amber-500/10 px-1.5 py-0.2 text-[9px] font-medium text-amber-600 dark:text-amber-400">
+                            custom
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                          disabled={isFirst}
+                          aria-label={`Move ${kindDef?.label ?? el.label} up`}
+                          onClick={() => handleMoveElement(el.id, "up")}
+                        >
+                          <ChevronUp className="size-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                          disabled={isLast}
+                          aria-label={`Move ${kindDef?.label ?? el.label} down`}
+                          onClick={() => handleMoveElement(el.id, "down")}
+                        >
+                          <ChevronDown className="size-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                          aria-label={`Remove ${kindDef?.label ?? el.label}`}
+                          onClick={() => handleDeleteElement(el.id)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Field value or format input */}
+                    {el.kind === "pageNumber" ? (
+                      <div className="space-y-1">
+                        <label htmlFor={`footer-field-format-${el.id}`} className="text-[11px] text-muted-foreground">
+                          Number format
+                        </label>
+                        <Select
+                          id={`footer-field-format-${el.id}`}
+                          aria-label="Page number format"
+                          value={el.format ?? "n"}
+                          onChange={(e) => handleUpdateElement(el.id, { format: e.target.value as PageNumberFormat })}
+                          className="text-xs h-8"
+                        >
+                          {PAGE_NUMBER_FORMATS.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <Input
+                          id={`footer-field-val-${el.id}`}
+                          value={el.value}
+                          aria-label={`${kindDef?.label ?? el.label} value`}
+                          placeholder={getFooterFieldPlaceholder(el.kind)}
+                          onChange={(e) => handleUpdateElement(el.id, { value: e.target.value })}
+                          className="text-xs h-8"
+                        />
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+      )}
     </div>
   );
 }

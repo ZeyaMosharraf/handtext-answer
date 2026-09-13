@@ -781,7 +781,9 @@ export function EditorWorkspace({ project }: { project: Project }) {
                 const rect = pageBoxRef.current.getBoundingClientRect();
                 const screenX = e.clientX - rect.left;
                 const screenY = e.clientY - rect.top;
-                const coords = activeCoordinatesRef.current ?? createPageCoordinateSystem(settings);
+                const coords =
+                  activeCoordinatesRef.current ??
+                  createPageCoordinateSystem(settings, undefined, previewPageIndex + 1, Math.max(previewPages, 1));
                 const { pageX, pageY } = screenToPage(screenX, screenY, rect, coords);
                 const lineIndex = getLineIndexAtPageY(coords, pageY);
                 const baselineY = getBaseline(coords, lineIndex);
@@ -805,7 +807,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
 
               {writeOnPage &&
                 (() => {
-                  const area = writingArea(settings);
+                  const area = writingArea(settings, previewPageIndex + 1, Math.max(previewPages, 1));
                   const px = pageScale / area.pageWidth;
                   return (
                     <>
@@ -875,6 +877,8 @@ export function EditorWorkspace({ project }: { project: Project }) {
               settings={settings}
               onChange={(next) => commit((p) => ({ ...p, settings: next }))}
               templates={templates}
+              currentPage={previewPageIndex + 1}
+              totalPages={Math.max(previewPages, 1)}
               onSaveTemplate={(templateName) =>
                 saveTemplates([
                   ...templates,
