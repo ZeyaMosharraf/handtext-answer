@@ -461,11 +461,14 @@ function drawBand(
   const visible = visibleBandElements(band, pageNumber, totalPages);
 
   if (isHeader) {
-    // Separate right-aligned metadata elements (e.g. Date, Page Number) from others
+    // Separate right-aligned metadata elements from others
     const rightElements = visible.filter((el) => el.slot === "right");
     const otherElements = visible.filter((el) => el.slot !== "right");
 
-    if (rightElements.length > 0) {
+    // Classic assignment metadata box is drawn when 2 or more right-aligned metadata elements exist (e.g. Date + Page)
+    const showBox = settings.templateId !== "notebook" && rightElements.length >= 2;
+
+    if (showBox) {
       // Physical assignment-sheet top-right printed metadata box
       const boxWidth = 230;
       const boxRight = coordinates.pageWidth - pad;
@@ -475,22 +478,18 @@ function drawBand(
       const boxHeight = rowCount * boxRowHeight;
       const boxTop = Math.max(12, Math.floor((activeHeight - boxHeight) / 2));
 
-      const showBox = settings.templateId !== "notebook" && (rightElements.length > 1 || band.borderBottom);
-
-      if (showBox) {
-        ctx.save();
-        ctx.strokeStyle = band.borderColor || withAlpha(settings.page.ruling.color, 0.75);
-        ctx.lineWidth = 1;
-        ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
-        for (let i = 1; i < rowCount; i++) {
-          const lineY = boxTop + i * boxRowHeight;
-          ctx.beginPath();
-          ctx.moveTo(boxLeft, lineY);
-          ctx.lineTo(boxRight, lineY);
-          ctx.stroke();
-        }
-        ctx.restore();
+      ctx.save();
+      ctx.strokeStyle = band.borderColor || withAlpha(settings.page.ruling.color, 0.75);
+      ctx.lineWidth = 1;
+      ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
+      for (let i = 1; i < rowCount; i++) {
+        const lineY = boxTop + i * boxRowHeight;
+        ctx.beginPath();
+        ctx.moveTo(boxLeft, lineY);
+        ctx.lineTo(boxRight, lineY);
+        ctx.stroke();
       }
+      ctx.restore();
 
       rightElements.forEach((element, index) => {
         const rowY = boxTop + index * boxRowHeight;
@@ -537,39 +536,72 @@ function drawBand(
           ctx.restore();
         }
       });
-    }
 
-    // Left and center aligned elements in header
-    otherElements.forEach((element, idx) => {
-      const text = bandElementText(element, pageNumber, totalPages);
-      // Auto-resolve row collision so elements never overlap vertically
-      const hasRowCollision = otherElements.slice(0, idx).some((prev) => prev.row === element.row && prev.slot === element.slot);
-      const effectiveRow = hasRowCollision ? idx : (typeof element.row === "number" ? element.row : idx);
-      const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * BAND_ROW_HEIGHT + element.fontSize * 0.6;
-      const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
-      if (element.handwritten) {
-        const size = element.fontSize * 1.2;
-        const width = measureHandwritten(ctx, text, settings, size);
-        const x = element.slot === "left" ? left : coordinates.pageWidth / 2 - width / 2;
-        writeText(ctx, text, settings, x, baselineY, random, { size, color: element.color });
-      } else {
-        ctx.save();
-        ctx.font = `${element.fontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
-        ctx.fillStyle = element.color;
-        ctx.textBaseline = "alphabetic";
-        ctx.textAlign = element.slot === "left" ? "left" : "center";
-        ctx.fillText(text, element.slot === "left" ? left : coordinates.pageWidth / 2, baselineY);
-        ctx.restore();
-      }
-    });
+      // Left and center aligned elements in header alongside the box
+      otherElements.forEach((element, idx) => {
+        const text = bandElementText(element, pageNumber, totalPages);
+        const slotIndex = otherElements.slice(0, idx).filter((prev) => prev.slot === element.slot).length;
+        const hasRowCollision = otherElements.slice(0, idx).some(
+          (prev) => (typeof prev.row === "number" ? prev.row : 0) === element.row && prev.slot === element.slot,
+        );
+        const effectiveRow = typeof element.row === "number" && !hasRowCollision ? element.row : slotIndex;
+        const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * BAND_ROW_HEIGHT + element.fontSize * 0.6;
+        const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
+        if (element.handwritten) {
+          const size = element.fontSize * 1.2;
+          const width = measureHandwritten(ctx, text, settings, size);
+          const x = element.slot === "left" ? left : coordinates.pageWidth / 2 - width / 2;
+          writeText(ctx, text, settings, x, baselineY, random, { size, color: element.color });
+        } else {
+          ctx.save();
+          ctx.font = `${element.fontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
+          ctx.fillStyle = element.color;
+          ctx.textBaseline = "alphabetic";
+          ctx.textAlign = element.slot === "left" ? "left" : "center";
+          ctx.fillText(text, element.slot === "left" ? left : coordinates.pageWidth / 2, baselineY);
+          ctx.restore();
+        }
+      });
+    } else {
+      // Standard header elements without metadata box: all slots (left, center, right)
+      visible.forEach((element, idx) => {
+        const text = bandElementText(element, pageNumber, totalPages);
+        const slotIndex = visible.slice(0, idx).filter((prev) => prev.slot === element.slot).length;
+        const hasRowCollision = visible.slice(0, idx).some(
+          (prev) => (typeof prev.row === "number" ? prev.row : 0) === element.row && prev.slot === element.slot,
+        );
+        const effectiveRow = typeof element.row === "number" && !hasRowCollision ? element.row : slotIndex;
+        const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * BAND_ROW_HEIGHT + element.fontSize * 0.6;
+        const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
+        if (element.handwritten) {
+          const size = element.fontSize * 1.2;
+          const width = measureHandwritten(ctx, text, settings, size);
+          const x =
+            element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 - width / 2 : right - width;
+          writeText(ctx, text, settings, x, baselineY, random, { size, color: element.color });
+        } else {
+          ctx.save();
+          ctx.font = `${element.fontSize}px "Plus Jakarta Sans", ui-sans-serif, sans-serif`;
+          ctx.fillStyle = element.color;
+          ctx.textBaseline = "alphabetic";
+          ctx.textAlign = element.slot === "left" ? "left" : element.slot === "center" ? "center" : "right";
+          ctx.fillText(text, element.slot === "left" ? left : element.slot === "center" ? coordinates.pageWidth / 2 : right, baselineY);
+          ctx.restore();
+        }
+      });
+    }
   } else {
     // Footer elements: strictly contained within footer boundary
     visible.forEach((element, idx) => {
       const text = bandElementText(element, pageNumber, totalPages);
       // Auto-resolve row collision so elements sharing the same slot never overlap vertically
-      const hasRowCollision = visible.slice(0, idx).some((prev) => prev.row === element.row && prev.slot === element.slot);
-      const effectiveRow = hasRowCollision ? idx : (typeof element.row === "number" ? element.row : idx);
-      const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * BAND_ROW_HEIGHT + element.fontSize * 0.6;
+      const slotIndex = visible.slice(0, idx).filter((prev) => prev.slot === element.slot).length;
+      const hasRowCollision = visible.slice(0, idx).some(
+        (prev) => (typeof prev.row === "number" ? prev.row : 0) === element.row && prev.slot === element.slot,
+      );
+      const effectiveRow = typeof element.row === "number" && !hasRowCollision ? element.row : slotIndex;
+      const footerRowHeight = 32;
+      const requestedBaseline = topY + BAND_PAD_TOP + effectiveRow * footerRowHeight + element.fontSize * 0.6;
       const baselineY = Math.min(topY + activeHeight - 8, Math.max(topY + element.fontSize, requestedBaseline));
       if (element.handwritten) {
         const size = element.fontSize * 1.2;

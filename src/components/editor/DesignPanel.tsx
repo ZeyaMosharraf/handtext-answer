@@ -793,10 +793,13 @@ function HeaderEditor({
     currentElements[targetIdx] = currentEl;
 
     let leftCount = 0;
+    let centerCount = 0;
     let rightCount = 0;
     const normalized = currentElements.map((el) => {
       if (el.slot === "right") {
         return { ...el, row: rightCount++ };
+      } else if (el.slot === "center") {
+        return { ...el, row: centerCount++ };
       } else {
         return { ...el, row: leftCount++ };
       }
@@ -1131,6 +1134,46 @@ function HeaderEditor({
                         />
                       </div>
                     )}
+
+                    {/* Handwritten toggle */}
+                    <div className="pt-0.5">
+                      <label className="inline-flex items-center gap-2 text-xs font-medium cursor-pointer select-none text-foreground">
+                        <input
+                          type="checkbox"
+                          id={`field-handwritten-${el.id}`}
+                          checked={Boolean(el.handwritten)}
+                          onChange={(e) => handleUpdateElement(el.id, { handwritten: e.target.checked })}
+                          className="size-3.5 rounded border-border accent-primary cursor-pointer"
+                        />
+                        <span>Handwritten</span>
+                      </label>
+                    </div>
+
+                    {/* Position segmented control */}
+                    <div className="space-y-1 pt-0.5">
+                      <span className="text-[11px] font-medium text-muted-foreground">Position</span>
+                      <div className="grid grid-cols-3 gap-1 rounded-md bg-muted/60 p-0.5 border border-border/40">
+                        {(["left", "center", "right"] as const).map((pos) => {
+                          const isSelected = (el.slot ?? "left") === pos;
+                          return (
+                            <button
+                              key={pos}
+                              type="button"
+                              id={`field-pos-${el.id}-${pos}`}
+                              onClick={() => handleUpdateElement(el.id, { slot: pos })}
+                              className={cn(
+                                "h-6 rounded text-[11px] font-medium transition-all capitalize",
+                                isSelected
+                                  ? "bg-background text-foreground shadow-sm font-semibold"
+                                  : "text-muted-foreground hover:text-foreground"
+                              )}
+                            >
+                              {pos}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </li>
                 );
               })}
@@ -1353,10 +1396,13 @@ function FooterEditor({
     currentElements[targetIdx] = currentEl;
 
     let leftCount = 0;
+    let centerCount = 0;
     let rightCount = 0;
     const normalized = currentElements.map((el) => {
       if (el.slot === "right") {
         return { ...el, row: rightCount++ };
+      } else if (el.slot === "center") {
+        return { ...el, row: centerCount++ };
       } else {
         return { ...el, row: leftCount++ };
       }
@@ -1691,6 +1737,46 @@ function FooterEditor({
                         />
                       </div>
                     )}
+
+                    {/* Handwritten toggle */}
+                    <div className="pt-0.5">
+                      <label className="inline-flex items-center gap-2 text-xs font-medium cursor-pointer select-none text-foreground">
+                        <input
+                          type="checkbox"
+                          id={`footer-field-handwritten-${el.id}`}
+                          checked={Boolean(el.handwritten)}
+                          onChange={(e) => handleUpdateElement(el.id, { handwritten: e.target.checked })}
+                          className="size-3.5 rounded border-border accent-primary cursor-pointer"
+                        />
+                        <span>Handwritten</span>
+                      </label>
+                    </div>
+
+                    {/* Position segmented control */}
+                    <div className="space-y-1 pt-0.5">
+                      <span className="text-[11px] font-medium text-muted-foreground">Position</span>
+                      <div className="grid grid-cols-3 gap-1 rounded-md bg-muted/60 p-0.5 border border-border/40">
+                        {(["left", "center", "right"] as const).map((pos) => {
+                          const isSelected = (el.slot ?? "left") === pos;
+                          return (
+                            <button
+                              key={pos}
+                              type="button"
+                              id={`footer-field-pos-${el.id}-${pos}`}
+                              onClick={() => handleUpdateElement(el.id, { slot: pos })}
+                              className={cn(
+                                "h-6 rounded text-[11px] font-medium transition-all capitalize",
+                                isSelected
+                                  ? "bg-background text-foreground shadow-sm font-semibold"
+                                  : "text-muted-foreground hover:text-foreground"
+                              )}
+                            >
+                              {pos}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </li>
                 );
               })}
