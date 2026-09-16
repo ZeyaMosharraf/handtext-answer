@@ -68,6 +68,12 @@ export function useProjectPersistence({
     [project.name, project.question, project.content, project.settings],
   );
 
+  const initialSnapshotRef = useRef<ProjectSnapshot>(initialSnapshot);
+  initialSnapshotRef.current = initialSnapshot;
+
+  const onRestoreRef = useRef(onRestore);
+  onRestoreRef.current = onRestore;
+
   const lastCloudSavedSnapshotRef = useRef<ProjectSnapshot>(initialSnapshot);
   const lastLocalSavedSnapshotRef = useRef<ProjectSnapshot>(initialSnapshot);
 
@@ -76,6 +82,7 @@ export function useProjectPersistence({
   const pendingCloudSaveRef = useRef(false);
   const isMountedRef = useRef(false);
   const isRestorationCompleteRef = useRef(false);
+  const restoredProjectIdRef = useRef<string | null>(null);
 
   // ── Dirty checks ─────────────────────────────────────────────────────────
 
@@ -90,24 +97,40 @@ export function useProjectPersistence({
   // ── Local draft restoration on mount ─────────────────────────────────────
 
   useEffect(() => {
+    // Prevent duplicate restoration runs for the same project in this component lifecycle
+    if (restoredProjectIdRef.current === project.id) {
+      return;
+    }
+
     let isCancelled = false;
 
     async function checkAndRestoreLocalDraft() {
       try {
         const localRecord = await getLocalDraft(project.user_id, project.id);
-        if (isCancelled || !localRecord || !localRecord.draft) return;
+        if (isCancelled) return;
 
+        if (!localRecord || !localRecord.draft) {
+          restoredProjectIdRef.current = project.id;
+          isRestorationCompleteRef.current = true;
+          return;
+        }
+
+        const snapshot = initialSnapshotRef.current;
         const cloudUpdatedTimestamp = project.updated_at ? new Date(project.updated_at).getTime() : 0;
-        const hasUnsyncedEdits = !localRecord.isSynced && !isProjectSnapshotEqual(localRecord.draft, initialSnapshot);
+        const hasUnsyncedEdits = !localRecord.isSynced && !isProjectSnapshotEqual(localRecord.draft, snapshot);
         const isLocalNewer =
           localRecord.savedAt > cloudUpdatedTimestamp &&
-          !isProjectSnapshotEqual(localRecord.draft, initialSnapshot);
+          !isProjectSnapshotEqual(localRecord.draft, snapshot);
 
         if (hasUnsyncedEdits || isLocalNewer) {
-          onRestore(localRecord.draft);
+          if (isCancelled) return;
+          restoredProjectIdRef.current = project.id;
+          onRestoreRef.current(localRecord.draft);
           lastLocalSavedSnapshotRef.current = { ...localRecord.draft };
           setSaveState("saved-locally");
-          toast.info("Restored your local draft");
+          toast.info("Restored your local draft", { id: `restore-draft-${project.id}` });
+        } else {
+          restoredProjectIdRef.current = project.id;
         }
       } catch (err) {
         console.error("Failed to restore local draft from IndexedDB:", err);
@@ -119,8 +142,15 @@ export function useProjectPersistence({
     }
 
     void checkAndRestoreLocalDraft();
-    return () => { isCancelled = true; };
-  }, [project.id, project.user_id, project.updated_at, initialSnapshot, onRestore]);
+
+    return () => {
+      isCancelled = true;
+      // In development StrictMode replay, if unmounted before completion, allow subsequent mount to restore
+      if (!isRestorationCompleteRef.current) {
+        restoredProjectIdRef.current = null;
+      }
+    };
+  }, [project.id, project.user_id, project.updated_at]);
 
   // ── Local save (IndexedDB only — never Supabase) ──────────────────────────
 

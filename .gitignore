@@ -34,6 +34,8 @@ bun-debug.log*
 .env
 .env.*
 !.env.example
+tests/fixtures/test-account.local.json
+tests/fixtures/*.local.json
 
 # =========================
 # Cloudflare / Wrangler

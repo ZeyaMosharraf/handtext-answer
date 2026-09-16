@@ -428,6 +428,7 @@ function drawTableRow(
     const firstTextLine = placement.lineIndex + Math.max(0, Math.floor((availableLines - lines.length) / 2));
     const fontScale = settings.table.fontScale;
     const baseSize = settings.fontSize * fontScale * (placement.isHeader ? 1.02 : 1);
+    const baselineOffset = Math.max(0, coordinates.rulingSpacing * 0.5 - baseSize * 0.25);
 
     lines.forEach((text, line) => {
       if (!text || !text.trim()) return;
@@ -447,7 +448,7 @@ function drawTableRow(
         segs,
         settings,
         textX,
-        getBaseline(coordinates, firstTextLine + line),
+        getBaseline(coordinates, firstTextLine + line) - baselineOffset,
         random,
         {
           size: baseSize,

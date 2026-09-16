@@ -522,9 +522,6 @@ function tableRows(
       wrapCellLines(ctx, row[column] ?? "", settings, scale, Math.max(24, width - padding * 2)),
     );
     const textLines = Math.max(1, ...cells.map((lines) => lines.length));
-    // Keep at least one complete ruled interval around the writing. This lets
-    // the horizontal table borders land on notebook rules without touching it.
-    const paddingLines = Math.floor((padding * 2) / (settings.fontSize * settings.lineSpacing));
     return {
       type: "tableRow",
       tableId,
@@ -534,7 +531,7 @@ function tableRows(
       cells,
       columnWidths,
       alignments,
-      lineUnits: Math.max(2, textLines + 1 + paddingLines),
+      lineUnits: Math.max(1, textLines),
       gapLines: 0,
     };
   });

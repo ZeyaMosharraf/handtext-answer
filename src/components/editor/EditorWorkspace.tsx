@@ -160,20 +160,22 @@ export function EditorWorkspace({ project }: { project: Project }) {
   // Keep currentDraftRef updated with latest values for async access
   currentDraftRef.current = { name, question, content, settings, assignmentMode };
 
+  const handleRestore = useCallback((snapshot: ProjectSnapshot) => {
+    setName(snapshot.name);
+    setDraft({
+      question: snapshot.question,
+      content: snapshot.content,
+      settings: snapshot.settings,
+    });
+    setAssignmentMode(snapshot.assignmentMode);
+    currentDraftRef.current = { ...snapshot };
+  }, []);
+
   const { saveState, performLocalSave, performCloudSave, isDirtyLocally, autosaveTimerRef, isMountedRef } = useProjectPersistence({
     project,
     queryClient,
     currentDraftRef,
-    onRestore: (snapshot) => {
-      setName(snapshot.name);
-      setDraft({
-        question: snapshot.question,
-        content: snapshot.content,
-        settings: snapshot.settings,
-      });
-      setAssignmentMode(snapshot.assignmentMode);
-      currentDraftRef.current = { ...snapshot };
-    },
+    onRestore: handleRestore,
   });
 
   // Ctrl+Z / Ctrl+Y shortcuts — kept here because undo/redo is local state
