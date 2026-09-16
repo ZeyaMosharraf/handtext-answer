@@ -46,10 +46,8 @@ import {
   type PageCoordinateSystem,
 } from "@/lib/handwriting";
 import { htmlToPlainText, migrateLegacyContentToHtml, plainTextToHtml } from "@/lib/handwriting/parse";
-import { getLocalDraft, markLocalDraftSynced, saveLocalDraft } from "@/lib/local-drafts";
 import {
   getUserUsage,
-  isProjectSnapshotEqual,
   recordUsage,
   updateProject,
   type Project,
@@ -58,6 +56,7 @@ import {
 } from "@/lib/projects";
 import { loadTemplates, persistTemplates, type SavedTemplate } from "@/lib/templates";
 import { cn } from "@/lib/utils";
+import { useProjectPersistence } from "@/hooks/useProjectPersistence";
 
 const AUTOSAVE_DELAY_MS = 3000;
 
@@ -149,174 +148,35 @@ export function EditorWorkspace({ project }: { project: Project }) {
     });
   }, []);
 
-  /* ---------------------- client-side persistence & local autosave ----------- */
-  type SaveState = "saved" | "saved-locally" | "saving-cloud" | "error";
-  const [saveState, setSaveState] = useState<SaveState>("saved");
-
-  const initialSnapshot = useMemo<ProjectSnapshot>(
-    () => ({
-      name: project.name,
-      question: project.question,
-      content: migrateLegacyContentToHtml(project.content),
-      settings: project.settings,
-      assignmentMode: Boolean(project.question),
-    }),
-    [project.name, project.question, project.content, project.settings],
-  );
-
-  const lastCloudSavedSnapshotRef = useRef<ProjectSnapshot>(initialSnapshot);
-  const lastLocalSavedSnapshotRef = useRef<ProjectSnapshot>(initialSnapshot);
-  const currentDraftRef = useRef<ProjectSnapshot>(initialSnapshot);
+  /* ---------------------- persistence (IndexedDB + Supabase) ---------------- */
+  const currentDraftRef = useRef<ProjectSnapshot>({
+    name: project.name,
+    question: project.question,
+    content: migrateLegacyContentToHtml(project.content),
+    settings: project.settings,
+    assignmentMode: Boolean(project.question),
+  });
 
   // Keep currentDraftRef updated with latest values for async access
-  currentDraftRef.current = {
-    name,
-    question,
-    content,
-    settings,
-    assignmentMode,
-  };
+  currentDraftRef.current = { name, question, content, settings, assignmentMode };
 
-  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isCloudSavingRef = useRef(false);
-  const pendingCloudSaveRef = useRef(false);
-  const isMountedRef = useRef(false);
-  const isRestorationCompleteRef = useRef(false);
-
-  // Check and restore local draft from IndexedDB on initial load
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function checkAndRestoreLocalDraft() {
-      try {
-        const localRecord = await getLocalDraft(project.user_id, project.id);
-        if (isCancelled || !localRecord || !localRecord.draft) return;
-
-        const cloudUpdatedTimestamp = project.updated_at ? new Date(project.updated_at).getTime() : 0;
-        const hasUnsyncedEdits = !localRecord.isSynced && !isProjectSnapshotEqual(localRecord.draft, initialSnapshot);
-        const isLocalNewer = localRecord.savedAt > cloudUpdatedTimestamp && !isProjectSnapshotEqual(localRecord.draft, initialSnapshot);
-
-        if (hasUnsyncedEdits || isLocalNewer) {
-          setName(localRecord.draft.name);
-          setDraft({
-            question: localRecord.draft.question,
-            content: localRecord.draft.content,
-            settings: localRecord.draft.settings,
-          });
-          setAssignmentMode(localRecord.draft.assignmentMode);
-
-          currentDraftRef.current = { ...localRecord.draft };
-          lastLocalSavedSnapshotRef.current = { ...localRecord.draft };
-          setSaveState("saved-locally");
-          toast.info("Restored your local draft");
-        }
-      } catch (err) {
-        console.error("Failed to restore local draft from IndexedDB:", err);
-      } finally {
-        if (!isCancelled) {
-          isRestorationCompleteRef.current = true;
-        }
-      }
-    }
-
-    void checkAndRestoreLocalDraft();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [project.id, project.user_id, project.updated_at, initialSnapshot]);
-
-  const isDirtyLocally = useCallback((): boolean => {
-    return !isProjectSnapshotEqual(currentDraftRef.current, lastLocalSavedSnapshotRef.current);
-  }, []);
-
-  const isDirtyCloud = useCallback((): boolean => {
-    return !isProjectSnapshotEqual(currentDraftRef.current, lastCloudSavedSnapshotRef.current);
-  }, []);
-
-  // Autosave locally to IndexedDB - NEVER touches Supabase
-  const performLocalSave = useCallback(async () => {
-    const snapshotToPersist = { ...currentDraftRef.current };
-    try {
-      const isSynced = isProjectSnapshotEqual(snapshotToPersist, lastCloudSavedSnapshotRef.current);
-      await saveLocalDraft(project.user_id, project.id, snapshotToPersist, {
-        isSynced,
-        cloudUpdatedAt: project.updated_at,
+  const { saveState, performLocalSave, performCloudSave, isDirtyLocally, autosaveTimerRef, isMountedRef } = useProjectPersistence({
+    project,
+    queryClient,
+    currentDraftRef,
+    onRestore: (snapshot) => {
+      setName(snapshot.name);
+      setDraft({
+        question: snapshot.question,
+        content: snapshot.content,
+        settings: snapshot.settings,
       });
-      lastLocalSavedSnapshotRef.current = snapshotToPersist;
-      setSaveState(isSynced ? "saved" : "saved-locally");
-    } catch (err) {
-      console.error("Failed to autosave locally:", err);
-    }
-  }, [project.id, project.user_id, project.updated_at]);
+      setAssignmentMode(snapshot.assignmentMode);
+      currentDraftRef.current = { ...snapshot };
+    },
+  });
 
-  // Explicit Save / Ctrl+S to Supabase - ONLY path that updates cloud
-  const performCloudSave = useCallback(async (): Promise<boolean> => {
-    // 1. Cancel pending debounce timer
-    if (autosaveTimerRef.current) {
-      clearTimeout(autosaveTimerRef.current);
-      autosaveTimerRef.current = null;
-    }
-
-    const snapshotToPersist = { ...currentDraftRef.current };
-
-    // 2. Ensure latest draft is in IndexedDB
-    try {
-      await saveLocalDraft(project.user_id, project.id, snapshotToPersist, {
-        isSynced: false,
-        cloudUpdatedAt: project.updated_at,
-      });
-      lastLocalSavedSnapshotRef.current = snapshotToPersist;
-    } catch (err) {
-      console.error("Failed to update local draft before cloud save:", err);
-    }
-
-    // 3. If already identical to confirmed cloud snapshot, skip Supabase PATCH
-    if (isProjectSnapshotEqual(snapshotToPersist, lastCloudSavedSnapshotRef.current)) {
-      setSaveState("saved");
-      await markLocalDraftSynced(project.user_id, project.id, project.updated_at);
-      return true;
-    }
-
-    // 4. Prevent concurrent cloud saves
-    if (isCloudSavingRef.current) {
-      pendingCloudSaveRef.current = true;
-      return false;
-    }
-
-    isCloudSavingRef.current = true;
-    setSaveState("saving-cloud");
-
-    try {
-      const updated = await updateProject(project.id, {
-        name: snapshotToPersist.name.trim() || "Untitled answer",
-        question: snapshotToPersist.assignmentMode ? snapshotToPersist.question : "",
-        content: snapshotToPersist.content,
-        settings: snapshotToPersist.settings,
-      });
-
-      queryClient.setQueryData(["project", project.id], updated);
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-
-      lastCloudSavedSnapshotRef.current = snapshotToPersist;
-      await markLocalDraftSynced(project.user_id, project.id, updated.updated_at);
-      setSaveState("saved");
-      toast.success("Saved");
-      return true;
-    } catch (error) {
-      console.error("Failed to save project to Supabase:", error);
-      setSaveState("error");
-      toast.error("Could not save to cloud. Your draft is saved locally.");
-      return false;
-    } finally {
-      isCloudSavingRef.current = false;
-      if (pendingCloudSaveRef.current) {
-        pendingCloudSaveRef.current = false;
-        void performCloudSave();
-      }
-    }
-  }, [project.id, project.user_id, project.updated_at, queryClient]);
-
+  // Ctrl+Z / Ctrl+Y shortcuts — kept here because undo/redo is local state
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -325,45 +185,11 @@ export function EditorWorkspace({ project }: { project: Project }) {
         e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
-      } else if (key === "s") {
-        e.preventDefault();
-        void performCloudSave();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, performCloudSave]);
-
-  // Safeguard against tab closure with unsaved cloud changes
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (isDirtyCloud()) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isDirtyCloud]);
-
-  // Flush latest draft to IndexedDB on unmount only if restoration was complete and has unsaved local changes
-  useEffect(() => {
-    return () => {
-      if (autosaveTimerRef.current) {
-        clearTimeout(autosaveTimerRef.current);
-      }
-      if (!isRestorationCompleteRef.current) {
-        return;
-      }
-      const snap = currentDraftRef.current;
-      if (!isProjectSnapshotEqual(snap, lastLocalSavedSnapshotRef.current)) {
-        void saveLocalDraft(project.user_id, project.id, snap, {
-          isSynced: isProjectSnapshotEqual(snap, lastCloudSavedSnapshotRef.current),
-          cloudUpdatedAt: project.updated_at,
-        }).catch(() => undefined);
-      }
-    };
-  }, [project.id, project.user_id, project.updated_at]);
+  }, [undo, redo]);
 
   /* -------------------------------- templates ------------------------------- */
   const [templates, setTemplates] = useState<SavedTemplate[]>([]);
@@ -520,11 +346,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
     }
 
     // Persist to local IndexedDB to guarantee offline safety
-    await saveLocalDraft(project.user_id, project.id, currentDraftRef.current, {
-      isSynced: isProjectSnapshotEqual(currentDraftRef.current, lastCloudSavedSnapshotRef.current),
-      cloudUpdatedAt: project.updated_at,
-    });
-    lastLocalSavedSnapshotRef.current = { ...currentDraftRef.current };
+    await performLocalSave();
 
     setGenerating(true);
     setProgress(5);

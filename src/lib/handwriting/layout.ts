@@ -2,12 +2,12 @@ import { parseContent, type Block, type BlockKind, type Seg } from "./parse";
 import {
   formatPageNumber,
   pageDimensions,
-  resolveEffectiveBand,
   type BandConfig,
   type ColumnAlignment,
   type HandwritingSettings,
   type PageElement,
 } from "./types";
+import { resolveEffectiveBand } from "./band-operations";
 
 export interface PageCoordinateSystem {
   pageWidth: number;
