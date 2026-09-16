@@ -430,10 +430,14 @@ function drawTableRow(
     const baseSize = settings.fontSize * fontScale * (placement.isHeader ? 1.02 : 1);
     const baselineOffset = Math.max(0, coordinates.rulingSpacing * 0.5 - baseSize * 0.25);
 
-    lines.forEach((text, line) => {
-      if (!text || !text.trim()) return;
+    lines.forEach((cellLine, line) => {
+      const lineText = typeof cellLine === "string" ? cellLine : cellLine.text;
+      if (!lineText || !lineText.trim()) return;
 
-      const segs = parseInline(text);
+      const segs =
+        typeof cellLine !== "string" && cellLine.segs && cellLine.segs.length > 0
+          ? cellLine.segs
+          : parseInline(lineText);
       const lineWidth = measureSegments(ctx, segs, settings, baseSize);
 
       let textX = colLeft + settings.table.cellPadding;

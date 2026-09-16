@@ -1,4 +1,4 @@
-import { parseContent, type Block, type BlockKind, type Seg } from "./parse";
+import { parseContent, getTableCellText, getTableCellSegs, segText, type Block, type BlockKind, type Seg, type TableCellData } from "./parse";
 import {
   formatPageNumber,
   pageDimensions,
@@ -23,6 +23,11 @@ export interface PageCoordinateSystem {
   footerHeight: number;
 }
 
+export interface LayoutCellLine {
+  text: string;
+  segs: Seg[];
+}
+
 export interface LayoutLine {
   type: "line";
   lineIndex: number;
@@ -42,7 +47,7 @@ export interface LayoutTableRow {
   isHeader: boolean;
   isFirst: boolean;
   isLast: boolean;
-  cells: string[][];
+  cells: LayoutCellLine[][];
   columnWidths: number[];
   alignments?: ColumnAlignment[];
 }
@@ -84,7 +89,7 @@ interface FlowTableRow {
   isHeader: boolean;
   isFirst: boolean;
   isLast: boolean;
-  cells: string[][];
+  cells: LayoutCellLine[][];
   columnWidths: number[];
   alignments?: ColumnAlignment[];
   lineUnits: number;
@@ -254,60 +259,74 @@ function wrapSegments(
 
 function wrapCellLines(
   ctx: CanvasRenderingContext2D,
-  text: string,
+  cell: TableCellData | string | undefined,
   settings: HandwritingSettings,
   scale: number,
   maxWidth: number,
-): string[] {
-  if (!text) return [];
-  // Split by explicit user newlines first
-  const logicalLines = text.split("\n");
-  const result: string[] = [];
+): LayoutCellLine[] {
+  const text = getTableCellText(cell);
+  const rawSegs = getTableCellSegs(cell);
+  if (!text && rawSegs.length === 0) return [];
+
+  // Split cell segments by newline '\n' into distinct logical lines
+  const logicalLines: Seg[][] = [];
+  let currentLogicalLine: Seg[] = [];
+
+  for (const seg of rawSegs) {
+    if (!seg.text.includes("\n")) {
+      currentLogicalLine.push(seg);
+      continue;
+    }
+    const parts = seg.text.split("\n");
+    for (let pIdx = 0; pIdx < parts.length; pIdx++) {
+      if (pIdx > 0) {
+        logicalLines.push(currentLogicalLine);
+        currentLogicalLine = [];
+      }
+      const part = parts[pIdx];
+      if (part) {
+        currentLogicalLine.push({ ...seg, text: part });
+      }
+    }
+  }
+  if (currentLogicalLine.length > 0 || logicalLines.length === 0) {
+    logicalLines.push(currentLogicalLine);
+  }
+
+  const result: LayoutCellLine[] = [];
 
   for (let lIdx = 0; lIdx < logicalLines.length; lIdx++) {
-    const line = logicalLines[lIdx] ?? "";
-    // If the logical line is empty, preserve it as an empty line (intentional blank line)
-    if (!line) {
+    const lineSegs = logicalLines[lIdx] ?? [];
+    const lineText = segText(lineSegs);
+
+    // If logical line is empty, preserve as an empty visual line
+    if (!lineText) {
       if (logicalLines.length > 1) {
-        result.push("");
+        result.push({ text: "", segs: [] });
       }
       continue;
     }
 
     // Check if the whole line fits inside maxWidth
     // This preserves consecutive spaces, ASCII art, and intentional indentation!
-    const measuredWidth = textWidth(ctx, line, settings, scale);
+    const measuredWidth = segmentsWidth(ctx, lineSegs, settings, scale);
     if (measuredWidth <= maxWidth) {
-      result.push(line);
+      result.push({ text: lineText, segs: lineSegs });
       continue;
     }
 
     // If it exceeds maxWidth, wrap at word boundaries while respecting cell width
-    const initialResultLength = result.length;
-    const tokens = line.split(/( +)/);
-    let current = "";
-    for (const token of tokens) {
-      if (!token) continue;
-      const isSpace = /^ +$/.test(token);
-      const isStartOfLogicalLine = current === "" && result.length === initialResultLength;
-      if (isSpace && !current && !isStartOfLogicalLine) {
-        // Skip wrap-boundary leading space on wrapped continuation lines
-        continue;
+    const wrapped = wrapSegments(ctx, lineSegs, settings, scale, maxWidth);
+    if (wrapped.length === 0) {
+      result.push({ text: lineText, segs: lineSegs });
+    } else {
+      for (const wSegs of wrapped) {
+        result.push({ text: segText(wSegs), segs: wSegs });
       }
-      const candidate = current + token;
-      if (current && textWidth(ctx, candidate, settings, scale) > maxWidth) {
-        result.push(current.trimEnd());
-        current = isSpace ? "" : token;
-      } else {
-        current = candidate;
-      }
-    }
-    if (current) {
-      result.push(current.trimEnd());
     }
   }
 
-  return result.length > 0 ? result : (text.trim() ? [text] : []);
+  return result.length > 0 ? result : (text.trim() ? [{ text, segs: rawSegs }] : []);
 }
 
 function activeCoordinateSystem(
@@ -506,7 +525,13 @@ function tableRows(
   const padding = settings.table.cellPadding;
   const scale = settings.table.fontScale;
   const natural = Array.from({ length: columns }, (_, column) => {
-    const widest = Math.max(0, ...table.rows.map((row) => textWidth(ctx, row[column] ?? "", settings, scale)));
+    const widest = Math.max(
+      0,
+      ...table.rows.map((row) => {
+        const cell = row[column];
+        return segmentsWidth(ctx, getTableCellSegs(cell), settings, scale);
+      }),
+    );
     return Math.min(widest + padding * 2, contentWidth * 0.6);
   });
   const naturalTotal = natural.reduce((sum, width) => sum + width, 0) || 1;
@@ -519,7 +544,7 @@ function tableRows(
 
   return table.rows.map((row, rowIndex) => {
     const cells = columnWidths.map((width, column) =>
-      wrapCellLines(ctx, row[column] ?? "", settings, scale, Math.max(24, width - padding * 2)),
+      wrapCellLines(ctx, row[column], settings, scale, Math.max(24, width - padding * 2)),
     );
     const textLines = Math.max(1, ...cells.map((lines) => lines.length));
     return {

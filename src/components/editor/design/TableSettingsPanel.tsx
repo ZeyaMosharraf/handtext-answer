@@ -31,10 +31,13 @@ export function TableSettingsPanel({ settings, onChange, content, onSetTableColu
     if (!tableBlock?.table || tableBlock.table.rows.length === 0) return [];
     const firstRow = tableBlock.table.rows[0] ?? [];
     const alignments = tableBlock.table.alignments ?? [];
-    return firstRow.map((cellText, idx) => ({
-      name: cellText.split("\n")[0]?.trim() || `Column ${idx + 1}`,
-      alignment: alignments[idx] ?? "left",
-    }));
+    return firstRow.map((cell, idx) => {
+      const cellText = typeof cell === "string" ? cell : cell.text;
+      return {
+        name: cellText.split("\n")[0]?.trim() || `Column ${idx + 1}`,
+        alignment: alignments[idx] ?? "left",
+      };
+    });
   }, [content]);
 
   return (

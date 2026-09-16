@@ -9,6 +9,9 @@ import {
   RotateCcw,
   Check,
   ChevronDown,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from "lucide-react";
 import { Button, Input } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
@@ -344,23 +347,173 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
 
       <div className="mx-0.5 h-4 w-px bg-border" />
 
+      {/* Contextual Table Alignment Controls */}
+      {formatState.tableInfo && (
+        <>
+          <div className="mx-0.5 h-4 w-px bg-border" />
+          <div className="flex items-center gap-0.5 rounded-md border border-border bg-muted/20 p-0.5">
+            <Button
+              type="button"
+              variant={formatState.tableInfo.alignment === "left" ? "secondary" : "ghost"}
+              size="sm"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => editorRef.current?.setTableColumnAlignment(formatState.tableInfo!.colIndex, "left")}
+              title="Align column left"
+              className="size-7 p-0 cursor-pointer"
+            >
+              <AlignLeft className="size-3.5" />
+              <span className="sr-only">Align left</span>
+            </Button>
+            <Button
+              type="button"
+              variant={formatState.tableInfo.alignment === "center" ? "secondary" : "ghost"}
+              size="sm"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => editorRef.current?.setTableColumnAlignment(formatState.tableInfo!.colIndex, "center")}
+              title="Align column center"
+              className="size-7 p-0 cursor-pointer"
+            >
+              <AlignCenter className="size-3.5" />
+              <span className="sr-only">Align center</span>
+            </Button>
+            <Button
+              type="button"
+              variant={formatState.tableInfo.alignment === "right" ? "secondary" : "ghost"}
+              size="sm"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => editorRef.current?.setTableColumnAlignment(formatState.tableInfo!.colIndex, "right")}
+              title="Align column right"
+              className="size-7 p-0 cursor-pointer"
+            >
+              <AlignRight className="size-3.5" />
+              <span className="sr-only">Align right</span>
+            </Button>
+          </div>
+        </>
+      )}
+
+      <div className="mx-0.5 h-4 w-px bg-border" />
+
       {/* Table Popover */}
       <div className="relative" ref={tableRef}>
         <Button
           type="button"
-          variant={tablePopoverOpen ? "secondary" : "ghost"}
+          variant={tablePopoverOpen || Boolean(formatState.tableInfo) ? "secondary" : "ghost"}
           size="sm"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => setTablePopoverOpen((v) => !v)}
-          title="Insert table"
-          className="h-8 gap-1.5 px-2 text-xs"
+          title={formatState.tableInfo ? "Table options" : "Insert table"}
+          className="h-8 gap-1.5 px-2 text-xs cursor-pointer"
         >
           <Table2 className="size-3.5 text-muted-foreground" />
           <span className="hidden sm:inline text-xs font-medium">Table</span>
           <ChevronDown className="size-3 text-muted-foreground" />
         </Button>
 
-        {tablePopoverOpen && (
+        {tablePopoverOpen && formatState.tableInfo && (
+          <div className="absolute left-0 top-full z-50 mt-1.5 w-60 rounded-lg border border-border bg-popover p-3 shadow-lg backdrop-blur animate-in fade-in zoom-in-95 cursor-default">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-foreground">Table Actions</span>
+              <span className="text-[10px] font-mono text-muted-foreground">
+                R{formatState.tableInfo.rowIndex + 1} / C{formatState.tableInfo.colIndex + 1}
+              </span>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Rows</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      editorRef.current?.insertTableRow("above");
+                      setTablePopoverOpen(false);
+                    }}
+                    className="h-7 text-xs justify-start px-2 cursor-pointer"
+                  >
+                    + Row Above
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      editorRef.current?.insertTableRow("below");
+                      setTablePopoverOpen(false);
+                    }}
+                    className="h-7 text-xs justify-start px-2 cursor-pointer"
+                  >
+                    + Row Below
+                  </Button>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    editorRef.current?.deleteTableRow();
+                    setTablePopoverOpen(false);
+                  }}
+                  className="w-full mt-1.5 h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10 justify-start px-2 cursor-pointer"
+                >
+                  Delete Current Row
+                </Button>
+              </div>
+
+              <div className="border-t border-border pt-2">
+                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Columns</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      editorRef.current?.insertTableColumn("left");
+                      setTablePopoverOpen(false);
+                    }}
+                    className="h-7 text-xs justify-start px-2 cursor-pointer"
+                  >
+                    + Col Left
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      editorRef.current?.insertTableColumn("right");
+                      setTablePopoverOpen(false);
+                    }}
+                    className="h-7 text-xs justify-start px-2 cursor-pointer"
+                  >
+                    + Col Right
+                  </Button>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    editorRef.current?.deleteTableColumn();
+                    setTablePopoverOpen(false);
+                  }}
+                  className="w-full mt-1.5 h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10 justify-start px-2 cursor-pointer"
+                >
+                  Delete Current Column
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tablePopoverOpen && !formatState.tableInfo && (
           <div className="absolute left-0 top-full z-50 mt-1.5 w-52 rounded-lg border border-border bg-popover p-3 shadow-lg backdrop-blur animate-in fade-in zoom-in-95 cursor-default">
             <div className="mb-2 text-xs font-semibold text-foreground">Insert Table</div>
             <div className="flex items-center gap-2 mb-3">
@@ -395,7 +548,7 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
                 editorRef.current?.insertTable(tableRows, tableCols);
                 setTablePopoverOpen(false);
               }}
-              className="w-full h-8 text-xs font-medium"
+              className="w-full h-8 text-xs font-medium cursor-pointer"
             >
               Insert {tableRows}×{tableCols} Table
             </Button>

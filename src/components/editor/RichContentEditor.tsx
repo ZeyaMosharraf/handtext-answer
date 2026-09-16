@@ -1,5 +1,15 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { HIGHLIGHT_COLOR, isHtmlContent, migrateLegacyContentToHtml } from "@/lib/handwriting/parse";
+import {
+  type TableSelectionInfo,
+  getTableSelectionInfo,
+  insertTableRow as domInsertTableRow,
+  deleteTableRow as domDeleteTableRow,
+  insertTableColumn as domInsertTableColumn,
+  deleteTableColumn as domDeleteTableColumn,
+  setTableColumnAlignment as domSetTableColumnAlignment,
+  handleTableTabNavigation,
+} from "@/lib/table-dom";
 import { cn } from "@/lib/utils";
 
 export interface FormatState {
@@ -12,6 +22,7 @@ export interface FormatState {
   highlight?: string | undefined;
   hasSelection: boolean;
   selectionRect?: { top: number; left: number; width: number; height: number } | undefined;
+  tableInfo?: TableSelectionInfo | undefined;
 }
 
 export interface RichContentEditorHandle {
@@ -24,7 +35,12 @@ export interface RichContentEditorHandle {
   setHighlight: (color: string | null) => void;
   clearFormatting: () => void;
   insertTable: (rows: number, cols: number) => void;
+  insertTableRow: (relative: "above" | "below") => void;
+  deleteTableRow: () => void;
+  insertTableColumn: (relative: "left" | "right") => void;
+  deleteTableColumn: () => void;
   setTableColumnAlignment: (colIndex: number, alignment: "left" | "center" | "right") => void;
+  getTableInfo: () => TableSelectionInfo | null;
   focus: () => void;
   getFormatState: () => FormatState;
 }
@@ -148,6 +164,8 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         blackInk = true;
       }
 
+      const tableInfo = getTableSelectionInfo(editorRef.current);
+
       return {
         bold,
         italic,
@@ -158,6 +176,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         highlight,
         hasSelection,
         selectionRect,
+        tableInfo: tableInfo ?? undefined,
       };
     }, []);
 
@@ -372,24 +391,60 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       [triggerChange],
     );
 
+    const getTableInfo = useCallback((): TableSelectionInfo | null => {
+      return getTableSelectionInfo(editorRef.current);
+    }, []);
+
+    const insertTableRow = useCallback(
+      (relative: "above" | "below") => {
+        const info = getTableSelectionInfo(editorRef.current);
+        if (!info) return;
+        domInsertTableRow(info.table, info.rowIndex, relative);
+        triggerChange();
+      },
+      [triggerChange],
+    );
+
+    const deleteTableRow = useCallback(() => {
+      const info = getTableSelectionInfo(editorRef.current);
+      if (!info) return;
+      domDeleteTableRow(info.table, info.rowIndex);
+      triggerChange();
+    }, [triggerChange]);
+
+    const insertTableColumn = useCallback(
+      (relative: "left" | "right") => {
+        const info = getTableSelectionInfo(editorRef.current);
+        if (!info) return;
+        domInsertTableColumn(info.table, info.colIndex, relative);
+        triggerChange();
+      },
+      [triggerChange],
+    );
+
+    const deleteTableColumn = useCallback(() => {
+      const info = getTableSelectionInfo(editorRef.current);
+      if (!info) return;
+      domDeleteTableColumn(info.table, info.colIndex);
+      triggerChange();
+    }, [triggerChange]);
+
     const setTableColumnAlignment = useCallback(
       (colIndex: number, alignment: "left" | "center" | "right") => {
         const el = editorRef.current;
         if (!el) return;
 
+        const info = getTableSelectionInfo(el);
+        if (info) {
+          domSetTableColumnAlignment(info.table, colIndex, alignment);
+          triggerChange();
+          return;
+        }
+
         const tables = el.querySelectorAll("table");
         if (tables.length > 0) {
           tables.forEach((table) => {
-            const rows = Array.from(table.rows);
-            for (const row of rows) {
-              const cell = row.cells[colIndex];
-              if (cell) {
-                cell.style.textAlign = alignment;
-                cell.setAttribute("data-align", alignment);
-                cell.classList.remove("text-left", "text-center", "text-right");
-                cell.classList.add(`text-${alignment}`);
-              }
-            }
+            domSetTableColumnAlignment(table, colIndex, alignment);
           });
           triggerChange();
           return;
@@ -434,7 +489,12 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         setHighlight,
         clearFormatting,
         insertTable,
+        insertTableRow,
+        deleteTableRow,
+        insertTableColumn,
+        deleteTableColumn,
         setTableColumnAlignment,
+        getTableInfo,
         focus: () => editorRef.current?.focus(),
         getFormatState: () => formatState,
       }),
@@ -448,12 +508,25 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         setHighlight,
         clearFormatting,
         insertTable,
+        insertTableRow,
+        deleteTableRow,
+        insertTableColumn,
+        deleteTableColumn,
         setTableColumnAlignment,
+        getTableInfo,
         formatState,
       ],
     );
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === "Tab") {
+        if (editorRef.current && handleTableTabNavigation(editorRef.current, e.shiftKey)) {
+          e.preventDefault();
+          triggerChange();
+          return;
+        }
+      }
+
       if (e.ctrlKey || e.metaKey) {
         const key = e.key.toLowerCase();
         if (key === "b") {

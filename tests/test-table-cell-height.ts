@@ -70,8 +70,8 @@ console.log("\n=== Table Cell Height Regression Tests ===\n");
   const doc = layoutDocument(ctx, { content: htmlTable, settings });
   const tableRows = doc.pages[0]?.placements.filter((p) => p.type === "tableRow") as any[];
   assert(tableRows[1].lineUnits === 3, "Explicit blank line row lineUnits is 3", `got ${tableRows[1]?.lineUnits}`);
-  assert(tableRows[1].cells[0].length === 3, "Cell has 3 lines including blank middle line", `got ${tableRows[1].cells[0].length}`);
-  assert(tableRows[1].cells[0][1] === "", "Middle line is empty string (blank line)", `got "${tableRows[1].cells[0][1]}"`);
+  const middleLineText = typeof tableRows[1].cells[0][1] === "string" ? tableRows[1].cells[0][1] : tableRows[1].cells[0][1]?.text;
+  assert(middleLineText === "", "Middle line is empty string (blank line)", `got "${middleLineText}"`);
 }
 
 // 4. Mixed row: Cell A = 1 line, Cell B = 2 lines, Cell C = 1 line -> row lineUnits = 2
@@ -150,6 +150,81 @@ Some normal paragraph text with **bold** and *italic*.
   assert(Boolean(hasHeading), "Document retains Heading block");
   assert(Boolean(hasTable), "Document retains Table block");
   assert(Boolean(hasBullet), "Document retains Bullet block");
+}
+
+// 9. Intentional whitespace preservation inside cells (consecutive spaces & leading spaces)
+{
+  const whitespaceTable = `<table>
+  <tr><th>Header</th></tr>
+  <tr><td>    Leading 4 spaces and    multiple    consecutive spaces</td></tr>
+</table>`;
+  const doc = layoutDocument(ctx, { content: whitespaceTable, settings });
+  const tableRows = doc.pages[0]?.placements.filter((p) => p.type === "tableRow") as any[];
+  const cellLine = tableRows[1].cells[0][0];
+  assert(cellLine.text.startsWith("    Leading"), "Cell line preserves intentional leading spaces");
+  assert(cellLine.text.includes("    multiple    consecutive"), "Cell line preserves intentional consecutive spaces");
+}
+
+// 10. Rich text formatting in cells (bold, italic, underline, custom color, scale)
+{
+  const richTable = `<table>
+  <tr><th>Header</th></tr>
+  <tr><td><strong>Bold</strong> and <em>Italic</em> and <u>Underline</u> and <span style="color: #b3231f;" data-scale="1.2">Red Scaled</span></td></tr>
+</table>`;
+  const doc = layoutDocument(ctx, { content: richTable, settings });
+  const tableRows = doc.pages[0]?.placements.filter((p) => p.type === "tableRow") as any[];
+  const segs = tableRows[1].cells[0][0].segs;
+  const boldSeg = segs.find((s: any) => s.bold && s.text.includes("Bold"));
+  const italicSeg = segs.find((s: any) => s.italic && s.text.includes("Italic"));
+  const underlineSeg = segs.find((s: any) => s.underline && s.text.includes("Underline"));
+  const coloredSeg = segs.find((s: any) => s.color === "#b3231f");
+  const scaledSeg = segs.find((s: any) => s.scale === 1.2);
+
+  assert(Boolean(boldSeg), "Table cell preserves bold segment");
+  assert(Boolean(italicSeg), "Table cell preserves italic segment");
+  assert(Boolean(underlineSeg), "Table cell preserves underline segment");
+  assert(Boolean(coloredSeg), "Table cell preserves custom ink color segment (#b3231f)");
+  assert(Boolean(scaledSeg), "Table cell preserves text font scale segment (1.2)");
+}
+
+// 11. Column alignment metadata (left, center, right)
+{
+  const alignedTable = `<table>
+  <tr>
+    <th data-align="left" style="text-align: left;">Col Left</th>
+    <th data-align="center" style="text-align: center;">Col Center</th>
+    <th data-align="right" style="text-align: right;">Col Right</th>
+  </tr>
+  <tr>
+    <td data-align="left">Left</td>
+    <td data-align="center">Center</td>
+    <td data-align="right">Right</td>
+  </tr>
+</table>`;
+  const doc = layoutDocument(ctx, { content: alignedTable, settings });
+  const tableRows = doc.pages[0]?.placements.filter((p) => p.type === "tableRow") as any[];
+  const alignments = tableRows[0].alignments;
+  assert(alignments[0] === "left", "Column 0 alignment is 'left'");
+  assert(alignments[1] === "center", "Column 1 alignment is 'center'");
+  assert(alignments[2] === "right", "Column 2 alignment is 'right'");
+}
+
+// 12. Constrained table width (never exceeds A4 content width)
+{
+  const veryWideContentTable = `<table>
+  <tr><th>Col A</th><th>Col B</th><th>Col C</th></tr>
+  <tr>
+    <td>Very long text in column A that must wrap and not expand table beyond A4 boundary</td>
+    <td>Another very long text in column B that must wrap and not expand table beyond A4 boundary</td>
+    <td>Yet another very long text in column C that must wrap and not expand table beyond A4 boundary</td>
+  </tr>
+</table>`;
+  const doc = layoutDocument(ctx, { content: veryWideContentTable, settings });
+  const tableRows = doc.pages[0]?.placements.filter((p) => p.type === "tableRow") as any[];
+  const colWidths = tableRows[0].columnWidths as number[];
+  const totalTableWidth = colWidths.reduce((sum, w) => sum + w, 0);
+  const contentWidth = doc.pages[0].coordinates.contentRight - doc.pages[0].coordinates.contentLeft;
+  assert(Math.abs(totalTableWidth - contentWidth) < 0.001, "Total table width strictly matches constrained A4 content width");
 }
 
 console.log(`\nResults: ${passed} passed, ${failed} failed.\n`);

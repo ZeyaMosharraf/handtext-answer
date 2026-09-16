@@ -112,10 +112,27 @@ interface StyleFrame {
   highlight?: string | undefined;
 }
 
+export interface TableCellData {
+  text: string;
+  segs: Seg[];
+}
+
 export interface TableData {
-  rows: string[][];
+  rows: TableCellData[][];
   headerRow: boolean;
   alignments?: ColumnAlignment[];
+}
+
+export function getTableCellText(cell: TableCellData | string | undefined): string {
+  if (!cell) return "";
+  if (typeof cell === "string") return cell;
+  return cell.text;
+}
+
+export function getTableCellSegs(cell: TableCellData | string | undefined): Seg[] {
+  if (!cell) return [];
+  if (typeof cell === "string") return parseInline(cell);
+  return cell.segs.length ? cell.segs : [{ text: cell.text, bold: false, underline: false, italic: false }];
 }
 
 export interface Block {
@@ -393,7 +410,7 @@ export function parseHtmlContent(html: string): Block[] {
     }
 
     if (tag === "table") {
-      const rows: string[][] = [];
+      const rows: TableCellData[][] = [];
       let headerRow = false;
       const alignments: ColumnAlignment[] = [];
       const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
@@ -404,7 +421,7 @@ export function parseHtmlContent(html: string): Block[] {
         const trContent = trMatch[1] ?? "";
         const cellRe = /<(td|th)([^>]*)>([\s\S]*?)<\/\1>/gi;
         let cellMatch: RegExpExecArray | null;
-        const rowCells: string[] = [];
+        const rowCells: TableCellData[] = [];
         let hasTh = false;
         let colIndex = 0;
 
@@ -429,21 +446,19 @@ export function parseHtmlContent(html: string): Block[] {
             alignments[colIndex] = colAlign;
           }
 
-          // Convert HTML to cell text preserving intentional newlines, spaces, and inline markers
-          let normalized = rawCellHtml
-            .replace(/<br\s*\/?>/gi, "\n")
-            .replace(/<\/p>\s*<p[^>]*>/gi, "\n")
-            .replace(/<\/div>\s*<div[^>]*>/gi, "\n")
-            .replace(/<\/?(p|div)[^>]*>/gi, "\n")
-            .replace(/<(?:strong|b)[^>]*>([\s\S]*?)<\/(?:strong|b)>/gi, "**$1**")
-            .replace(/<(?:em|i)[^>]*>([\s\S]*?)<\/(?:em|i)>/gi, "*$1*")
-            .replace(/<u[^>]*>([\s\S]*?)<\/u>/gi, "__$1__");
+          // Normalize container tags inside cell to line breaks, preserving spans, styles, and inline markup
+          const normalizedCellHtml = rawCellHtml
+            .replace(/<br\s*\/?>/gi, "<br>")
+            .replace(/<\/p>\s*<p[^>]*>/gi, "<br>")
+            .replace(/<\/div>\s*<div[^>]*>/gi, "<br>")
+            .replace(/<\/?(p|div)[^>]*>/gi, "")
+            .replace(/\r/g, "");
 
-          normalized = normalized.replace(/<[^>]+>/g, "");
-          normalized = unescapeHtml(normalized);
-          normalized = normalized.replace(/\r/g, "").replace(/\n+$/, "");
+          // Parse full inline formatting (color, scale, bold, italic, underline, highlight, newlines)
+          const segs = parseInlineHtml(normalizedCellHtml);
+          const cellText = segText(segs).replace(/\n+$/, "");
 
-          rowCells.push(normalized);
+          rowCells.push({ text: cellText, segs });
           colIndex++;
         }
 
@@ -504,7 +519,7 @@ function parseLegacyMarkdown(raw: string): Block[] {
     const line = rawLine.trim();
 
     if (isTableRow(line)) {
-      const collected: string[][] = [];
+      const collected: TableCellData[][] = [];
       let headerRow = false;
       let alignments: ColumnAlignment[] = [];
       while (i < lines.length && isTableRow((lines[i] ?? "").trim())) {
@@ -521,7 +536,13 @@ function parseLegacyMarkdown(raw: string): Block[] {
               return "left";
             });
         } else {
-          collected.push(cells(current));
+          const rawRow = cells(current);
+          collected.push(
+            rawRow.map((cellText) => ({
+              text: stripInline(cellText),
+              segs: parseInline(cellText),
+            })),
+          );
         }
         i++;
       }
@@ -722,7 +743,7 @@ export function wordCount(raw: string): number {
 export function tableToMarkdown(table: TableData): string {
   const out: string[] = [];
   table.rows.forEach((row, index) => {
-    out.push(`| ${row.join(" | ")} |`);
+    out.push(`| ${row.map((c) => getTableCellText(c)).join(" | ")} |`);
     if (index === 0 && table.headerRow) {
       const divider = row
         .map((_, colIdx) => {
