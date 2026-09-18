@@ -8,6 +8,7 @@ import {
   type PageElement,
 } from "./types";
 import { resolveEffectiveBand } from "./band-operations";
+import { parseMath, layoutMath, computeLineUnits } from "../math";
 
 export interface PageCoordinateSystem {
   pageWidth: number;
@@ -52,6 +53,14 @@ export interface LayoutTableRow {
   alignments?: ColumnAlignment[];
 }
 
+export interface LayoutMathBlock {
+  type: "mathBlock";
+  lineIndex: number;
+  lineUnits: number;
+  latex: string;
+}
+
+
 export interface LayoutTableBounds {
   tableId: number;
   left: number;
@@ -60,7 +69,7 @@ export interface LayoutTableBounds {
   bottom: number;
 }
 
-export type LayoutPlacement = LayoutLine | LayoutTableRow;
+export type LayoutPlacement = LayoutLine | LayoutTableRow | LayoutMathBlock;
 
 export interface LayoutPage {
   pageNumber: number;
@@ -96,7 +105,14 @@ interface FlowTableRow {
   gapLines: number;
 }
 
-type FlowItem = FlowLine | FlowTableRow;
+interface FlowMathBlock {
+  type: "mathBlock";
+  latex: string;
+  lineUnits: number;
+  gapLines: number;
+}
+
+type FlowItem = FlowLine | FlowTableRow | FlowMathBlock;
 
 const KIND_SCALE: Record<BlockKind, number> = {
   heading: 1.22,
@@ -108,6 +124,7 @@ const KIND_SCALE: Record<BlockKind, number> = {
   divider: 1,
   table: 1,
   blank: 1,
+  math: 1,
 };
 
 export function bandApplies(band: BandConfig, pageNumber: number, totalPages: number) {
@@ -562,6 +579,27 @@ function tableRows(
   });
 }
 
+function mathFlowBlock(
+  block: Block,
+  settings: HandwritingSettings,
+  ctx: CanvasRenderingContext2D,
+): FlowMathBlock[] {
+  const latex = block.math?.latex ?? block.text;
+  if (!latex.trim()) return [];
+
+  // Parse and layout the math to determine its physical height
+  const ast = parseMath(latex);
+  const box = layoutMath(ast, ctx, settings, 1.0);
+
+  const coords = {
+    rulingSpacing: settings.fontSize * settings.lineSpacing,
+  };
+  const padding = settings.fontSize * 0.3;
+  const lineUnits = computeLineUnits(box, coords.rulingSpacing, padding);
+
+  return [{ type: "mathBlock", latex, lineUnits, gapLines: 0 }];
+}
+
 function buildFlow(
   ctx: CanvasRenderingContext2D,
   content: string,
@@ -602,6 +640,8 @@ function buildFlow(
     }
     const laid = block.kind === "table"
       ? tableRows(ctx, block, settings, contentWidth, tableId++)
+      : block.kind === "math"
+      ? mathFlowBlock(block, settings, ctx)
       : blockLines(ctx, block, settings, contentWidth);
     if (laid.length === 0) continue;
     laid[0]!.gapLines = pendingGapLines;
@@ -693,6 +733,8 @@ function paginate(
         scale: item.scale,
         underline: item.underline,
       });
+    } else if (item.type === "mathBlock") {
+      placements.push({ type: "mathBlock", lineIndex, lineUnits: item.lineUnits, latex: item.latex });
     } else {
       placements.push({ ...item, lineIndex });
     }

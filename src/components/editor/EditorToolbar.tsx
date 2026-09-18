@@ -6,6 +6,7 @@ import {
   Highlighter,
   Type,
   Table2,
+  Sigma,
   RotateCcw,
   Check,
   ChevronDown,
@@ -16,6 +17,7 @@ import {
 import { Button, Input } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
 import type { FormatState, RichContentEditorHandle } from "./RichContentEditor";
+import { MathFormulaModal } from "./MathFormulaModal";
 
 export const STUDENT_INKS = [
   { id: "royal", label: "Royal Blue", hex: "#174ea6" },
@@ -55,6 +57,7 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
 
   const [tableRows, setTableRows] = useState(4);
   const [tableCols, setTableCols] = useState(3);
+  const [mathModalOpen, setMathModalOpen] = useState(false);
 
   const colorRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -556,6 +559,23 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
         )}
       </div>
 
+      {/* Math Formula Button */}
+      <Button
+        type="button"
+        variant={formatState.mathInfo ? "secondary" : "ghost"}
+        size="sm"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setMathModalOpen(true)}
+        title={formatState.mathInfo ? "Edit math formula (click to edit)" : "Insert math formula (LaTeX)"}
+        className={cn(
+          "h-8 gap-1.5 px-2 text-xs cursor-pointer",
+          formatState.mathInfo && "bg-primary/10 text-primary border border-primary/20 font-medium",
+        )}
+      >
+        <Sigma className="size-3.5" />
+        <span className="hidden sm:inline text-xs font-medium">Math</span>
+      </Button>
+
       {/* Clear formatting */}
       <Button
         type="button"
@@ -569,6 +589,15 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
         <RotateCcw className="size-3.5" />
         <span className="sr-only">Clear formatting</span>
       </Button>
+
+      {/* Math Formula Modal */}
+      <MathFormulaModal
+        isOpen={mathModalOpen}
+        onClose={() => setMathModalOpen(false)}
+        initialLatex={formatState.mathInfo?.latex ?? ""}
+        mode={formatState.mathInfo ? "update" : "insert"}
+        editorRef={editorRef}
+      />
     </div>
   );
 }

@@ -15,3 +15,4 @@ This directory contains records of significant architectural decisions made in H
 | [`ADR-005`](./ADR-005-sparse-page-overrides.md) | Sparse Inheritance Model for Page-Specific Header and Footer Overrides | Proposed `[PROPOSED]` |
 | [`ADR-006`](./ADR-006-relational-metadata-jsonb-split.md) | Relational Metadata vs. Unified JSONB Document Storage Model | Proposed `[PROPOSED]` |
 | [`ADR-007`](./ADR-007-postgrest-update-resilience.md) | PostgREST Update Resilience and RLS Grant Hardening | Accepted `[CURRENT]` |
+| [`ADR-008`](./ADR-008-math-notation-architecture.md) | Mathematical Notation Architecture — Zero-Dep Handwritten Math Engine | Accepted `[PLANNED]` |

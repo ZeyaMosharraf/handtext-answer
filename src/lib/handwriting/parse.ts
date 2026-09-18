@@ -9,7 +9,8 @@ export type BlockKind =
   | "quote"
   | "divider"
   | "table"
-  | "blank";
+  | "blank"
+  | "math";
 
 /** A run of text sharing the same inline formatting. */
 export interface Seg {
@@ -135,12 +136,20 @@ export function getTableCellSegs(cell: TableCellData | string | undefined): Seg[
   return cell.segs.length ? cell.segs : [{ text: cell.text, bold: false, underline: false, italic: false }];
 }
 
+/** Stored in Block.math when kind === "math" (import-safe: no circular dep) */
+export interface MathBlockData {
+  latex: string;
+  display: "block" | "inline";
+}
+
 export interface Block {
   kind: BlockKind;
   text: string;
   segs?: Seg[];
   marker?: string;
   table?: TableData;
+  /** Present when kind === "math" */
+  math?: MathBlockData;
 }
 
 export const HIGHLIGHT_COLOR = "#141821"; // strong black ink for emphasis
@@ -363,7 +372,20 @@ export function parseHtmlContent(html: string): Block[] {
     lastIndex = blockRegex.lastIndex;
 
     const tag = (match[1] ?? "hr").toLowerCase();
+    const attrs = match[2] ?? "";
     const inner = match[3] ?? "";
+
+    // Check if the block tag itself is a math-block container
+    const latexAttrMatch = attrs.match(/data-latex=["']([^"']*)["']/i);
+    if (latexAttrMatch || attrs.includes("math-block")) {
+      const latex = latexAttrMatch ? unescapeHtml(latexAttrMatch[1] ?? "") : inner.trim();
+      blocks.push({
+        kind: "math",
+        text: latex,
+        math: { latex, display: "block" },
+      });
+      continue;
+    }
 
     if (tag === "hr") {
       blocks.push({ kind: "divider", text: "" });
@@ -473,12 +495,52 @@ export function parseHtmlContent(html: string): Block[] {
       continue;
     }
 
+    // Math display block: <div class="math-block" data-latex="...">...</div>
+    if (tag === "div" && /math-block/i.test(match[2] ?? "")) {
+      const latexMatch = (match[2] ?? "").match(/data-latex=["']([^"']*)["']/i)
+        ?? inner.match(/data-latex=["']([^"']*)["']/i);
+      const latex = latexMatch ? latexMatch[1]! : "";
+      if (latex.trim()) {
+        blocks.push({ kind: "math", text: latex, math: { latex, display: "block" } });
+      }
+      continue;
+    }
+
     if (tag === "div" && /<(h1|h2|h3|h4|blockquote|hr|table|ul|ol|p|div|pre)\b/i.test(inner)) {
       blocks.push(...parseHtmlContent(inner));
       continue;
     }
 
     if (tag === "p" || tag === "div" || tag === "pre") {
+      // Check if inner contains nested math-block elements
+      if (inner.includes("math-block") || inner.includes("data-latex")) {
+        const mathDivRegex = /<div[^>]*?(?:class=["'][^"']*math-block[^"']*["']|data-latex=["']([^"']*)["'])[^>]*>[\s\S]*?<\/div>/gi;
+        let lastInnerIdx = 0;
+        let mMatch: RegExpExecArray | null;
+        while ((mMatch = mathDivRegex.exec(inner)) !== null) {
+          const beforeHtml = inner.slice(lastInnerIdx, mMatch.index);
+          const beforeSegs = parseInlineHtml(beforeHtml);
+          const beforeText = segText(beforeSegs).trim();
+          if (beforeText) {
+            blocks.push({ kind: "paragraph", text: segText(beforeSegs), segs: beforeSegs });
+          }
+          const divTag = mMatch[0];
+          const lMatch = divTag.match(/data-latex=["']([^"']*)["']/i);
+          const latex = lMatch ? unescapeHtml(lMatch[1] ?? "") : "";
+          if (latex) {
+            blocks.push({ kind: "math", text: latex, math: { latex, display: "block" } });
+          }
+          lastInnerIdx = mathDivRegex.lastIndex;
+        }
+        const afterHtml = inner.slice(lastInnerIdx);
+        const afterSegs = parseInlineHtml(afterHtml);
+        const afterText = segText(afterSegs).trim();
+        if (afterText) {
+          blocks.push({ kind: "paragraph", text: segText(afterSegs), segs: afterSegs });
+        }
+        continue;
+      }
+
       const cleanInner = inner.trim();
       if (!cleanInner || cleanInner === "<br>" || cleanInner === "<br/>" || cleanInner === "<br />" || cleanInner === "&nbsp;") {
         blocks.push({ kind: "blank", text: "" });
@@ -555,6 +617,28 @@ function parseLegacyMarkdown(raw: string): Block[] {
 
     if (!line) {
       blocks.push({ kind: "blank", text: "" });
+      continue;
+    }
+
+    if (line.startsWith("$$")) {
+      if (line.endsWith("$$") && line.length > 4) {
+        const latex = line.slice(2, -2).trim();
+        blocks.push({ kind: "math", text: latex, math: { latex, display: "block" } });
+        continue;
+      }
+      const latexLines: string[] = [];
+      if (line.length > 2) latexLines.push(line.slice(2));
+      i++;
+      while (i < lines.length && !(lines[i] ?? "").trim().endsWith("$$")) {
+        latexLines.push(lines[i] ?? "");
+        i++;
+      }
+      if (i < lines.length) {
+        const last = (lines[i] ?? "").trim();
+        if (last.length > 2) latexLines.push(last.slice(0, -2));
+      }
+      const latex = latexLines.join("\n").trim();
+      blocks.push({ kind: "math", text: latex, math: { latex, display: "block" } });
       continue;
     }
 

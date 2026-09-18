@@ -23,6 +23,8 @@ export interface FormatState {
   hasSelection: boolean;
   selectionRect?: { top: number; left: number; width: number; height: number } | undefined;
   tableInfo?: TableSelectionInfo | undefined;
+  /** Present when the cursor is inside or adjacent to a math-block element */
+  mathInfo?: { latex: string; element: HTMLElement } | undefined;
 }
 
 export interface RichContentEditorHandle {
@@ -41,6 +43,12 @@ export interface RichContentEditorHandle {
   deleteTableColumn: () => void;
   setTableColumnAlignment: (colIndex: number, alignment: "left" | "center" | "right") => void;
   getTableInfo: () => TableSelectionInfo | null;
+  /** Insert a new math block at the current cursor position */
+  insertMathBlock: (latex: string) => void;
+  /** Update the latex of the currently focused math-block element */
+  updateMathBlock: (latex: string) => void;
+  /** Return the latex of the math-block the cursor is currently in/adjacent to */
+  getMathInfo: () => { latex: string } | null;
   focus: () => void;
   getFormatState: () => FormatState;
 }
@@ -166,6 +174,38 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
 
       const tableInfo = getTableSelectionInfo(editorRef.current);
 
+      // Detect math block adjacency — check sel.anchorNode's nearest ancestor or sibling
+      let mathInfo: { latex: string; element: HTMLElement } | undefined = undefined;
+      if (sel && sel.rangeCount > 0) {
+        let checkNode: Node | null = sel.anchorNode;
+        // Walk up to find a math-block or check siblings
+        while (checkNode && checkNode !== editorRef.current) {
+          if (checkNode.nodeType === 1) {
+            const el = checkNode as HTMLElement;
+            if (el.classList.contains("math-block")) {
+              const latex = el.getAttribute("data-latex") ?? "";
+              if (latex) { mathInfo = { latex, element: el }; currentMathElementRef.current = el; break; }
+            }
+          }
+          checkNode = checkNode.parentNode;
+        }
+        // Also check prev/next siblings of anchor
+        if (!mathInfo && sel.anchorNode) {
+          const prev = sel.anchorNode.previousSibling;
+          const next = sel.anchorNode.nextSibling;
+          for (const sibling of [prev, next]) {
+            if (sibling?.nodeType === 1) {
+              const sibEl = sibling as HTMLElement;
+              if (sibEl.classList.contains("math-block")) {
+                const latex = sibEl.getAttribute("data-latex") ?? "";
+                if (latex) { mathInfo = { latex, element: sibEl }; currentMathElementRef.current = sibEl; break; }
+              }
+            }
+          }
+        }
+      }
+      if (!mathInfo) currentMathElementRef.current = null;
+
       return {
         bold,
         italic,
@@ -177,6 +217,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         hasSelection,
         selectionRect,
         tableInfo: tableInfo ?? undefined,
+        mathInfo,
       };
     }, []);
 
@@ -477,6 +518,59 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       [triggerChange],
     );
 
+    const currentMathElementRef = useRef<HTMLElement | null>(null);
+
+    const insertMathBlock = useCallback((latex: string) => {
+      const el = editorRef.current;
+      if (!el) return;
+      el.focus();
+
+      // Build the math-block DOM node
+      const mathDiv = document.createElement("div");
+      mathDiv.className = "math-block";
+      mathDiv.setAttribute("data-latex", latex);
+      mathDiv.setAttribute("contenteditable", "false");
+      mathDiv.style.cssText =
+        "display:inline-flex;align-items:center;gap:6px;padding:4px 10px;" +
+        "margin:2px 0;border-radius:6px;background:rgba(99,102,241,0.08);" +
+        "border:1px solid rgba(99,102,241,0.25);cursor:pointer;user-select:none;" +
+        "font-family:monospace;font-size:0.82em;color:#4338ca;white-space:nowrap;";
+      mathDiv.innerHTML = `<span style="opacity:0.7;font-size:1.1em;">∑</span><span>${latex.length > 60 ? latex.slice(0, 57) + "…" : latex}</span>`;
+
+      // Insert at caret or at end
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(mathDiv);
+        // Move cursor after the inserted node
+        range.setStartAfter(mathDiv);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } else {
+        el.appendChild(mathDiv);
+      }
+
+      triggerChange();
+      updateFormatState();
+    }, [triggerChange, updateFormatState]);
+
+    const updateMathBlock = useCallback((latex: string) => {
+      const mathEl = currentMathElementRef.current;
+      if (!mathEl) return;
+      mathEl.setAttribute("data-latex", latex);
+      mathEl.innerHTML = `<span style="opacity:0.7;font-size:1.1em;">∑</span><span>${latex.length > 60 ? latex.slice(0, 57) + "…" : latex}</span>`;
+      triggerChange();
+    }, [triggerChange]);
+
+    const getMathInfo = useCallback((): { latex: string } | null => {
+      const mathEl = currentMathElementRef.current;
+      if (!mathEl) return null;
+      const latex = mathEl.getAttribute("data-latex") ?? "";
+      return latex ? { latex } : null;
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -495,6 +589,9 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         deleteTableColumn,
         setTableColumnAlignment,
         getTableInfo,
+        insertMathBlock,
+        updateMathBlock,
+        getMathInfo,
         focus: () => editorRef.current?.focus(),
         getFormatState: () => formatState,
       }),
@@ -515,6 +612,9 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         setTableColumnAlignment,
         getTableInfo,
         formatState,
+        insertMathBlock,
+        updateMathBlock,
+        getMathInfo,
       ],
     );
 

@@ -37,6 +37,7 @@ import {
   inkLine,
   type PenOptions,
 } from "./pen";
+import { parseMath, layoutMath } from "../math";
 
 export interface RenderInput {
   question?: string;
@@ -392,6 +393,29 @@ function drawBand(
   }
 }
 
+function drawMathBlock(
+  ctx: CanvasRenderingContext2D,
+  placement: Extract<LayoutPage["placements"][number], { type: "mathBlock" }>,
+  settings: HandwritingSettings,
+  coordinates: PageCoordinateSystem,
+  random: () => number,
+  ink: string,
+): void {
+  const ast = parseMath(placement.latex);
+  const box = layoutMath(ast, ctx, settings, 1.0);
+
+  // Baseline: lock to the first ruled line of this block's allocation
+  const baselineY = getBaseline(coordinates, placement.lineIndex);
+
+  // Horizontal: center wide formulas, left-align narrow ones
+  const contentWidth = coordinates.contentRight - coordinates.contentLeft;
+  const startX = box.width < contentWidth
+    ? coordinates.contentLeft
+    : coordinates.contentLeft;
+
+  box.draw(ctx, startX, baselineY, settings, random, ink);
+}
+
 function drawTableRow(
   ctx: CanvasRenderingContext2D,
   placement: Extract<LayoutPage["placements"][number], { type: "tableRow" }>,
@@ -578,6 +602,10 @@ export async function renderPageToCanvas(
       tableBounds.push(drawTableRow(ctx, placement, input.settings, page.coordinates, random, ink));
       continue;
     }
+    if (placement.type === "mathBlock") {
+      drawMathBlock(ctx, placement, input.settings, page.coordinates, random, ink);
+      continue;
+    }
     const segments = placement.marker
       ? [...plainSegments(`${placement.marker} `), ...placement.segs]
       : placement.segs;
@@ -654,6 +682,10 @@ export async function renderPages(input: RenderInput): Promise<RenderedPage[]> {
     for (const placement of page.placements) {
       if (placement.type === "tableRow") {
         tableBounds.push(drawTableRow(ctx, placement, input.settings, page.coordinates, random, ink));
+        continue;
+      }
+      if (placement.type === "mathBlock") {
+        drawMathBlock(ctx, placement, input.settings, page.coordinates, random, ink);
         continue;
       }
       const segments = placement.marker
