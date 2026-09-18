@@ -23,16 +23,31 @@ export const canvasGenerator: HandwritingGenerator = {
   id: "canvas-local",
   label: "Local handwriting renderer",
   async generate(input, onProgress) {
-    onProgress?.("Writing your answer...", 15);
-    const pages: RenderedPage[] = await renderPages(input);
-    onProgress?.("Creating natural handwriting...", 55);
-    const out = pages.map((p) => ({
-      pageNumber: p.pageNumber,
-      dataUrl: p.canvas.toDataURL("image/png"),
-      width: p.canvas.width,
-      height: p.canvas.height,
-    }));
-    onProgress?.("Formatting pages...", 90);
+    onProgress?.("Writing your answer...", 10);
+    const pages: RenderedPage[] = await renderPages(input, (rendered, total) => {
+      const pct = 10 + Math.round((rendered / total) * 75);
+      onProgress?.(`Writing page ${rendered} of ${total}...`, pct);
+    });
+    onProgress?.("Formatting pages...", 88);
+    const out: GeneratedPage[] = [];
+    for (let i = 0; i < pages.length; i++) {
+      const p = pages[i]!;
+      out.push({
+        pageNumber: p.pageNumber,
+        dataUrl: p.canvas.toDataURL("image/png"),
+        width: p.canvas.width,
+        height: p.canvas.height,
+      });
+      // Clear canvas buffer to free GPU/CPU memory immediately
+      p.canvas.width = 0;
+      p.canvas.height = 0;
+      if (i % 4 === 0 && i > 0 && typeof setTimeout !== "undefined") {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const pct = 88 + Math.round((i / pages.length) * 11);
+        onProgress?.(`Formatting page ${i + 1} of ${pages.length}...`, pct);
+      }
+    }
+    onProgress?.("Your handwritten answer is ready.", 100);
     return out;
   },
 };

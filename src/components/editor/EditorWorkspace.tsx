@@ -413,11 +413,6 @@ export function EditorWorkspace({ project }: { project: Project }) {
       setTab("content");
       return;
     }
-    if (content.length > 60000) {
-      toast.error("That answer is very long. Try splitting it into two projects.");
-      return;
-    }
-
     // Cancel pending autosave timer to prevent race conditions
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
@@ -445,11 +440,16 @@ export function EditorWorkspace({ project }: { project: Project }) {
       setProgress(100);
       setStage("Your handwritten answer is ready.");
       setPages(result);
-      const updated = await updateProject(project.id, { page_count: result.length, status: "generated" });
-      queryClient.setQueryData(["project", project.id], updated);
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-      await recordUsage(result.length);
-      queryClient.invalidateQueries({ queryKey: ["usage"] });
+
+      try {
+        const updated = await updateProject(project.id, { page_count: result.length, status: "generated" });
+        queryClient.setQueryData(["project", project.id], updated);
+        queryClient.invalidateQueries({ queryKey: ["projects"] });
+        await recordUsage(result.length);
+        queryClient.invalidateQueries({ queryKey: ["usage"] });
+      } catch (syncErr) {
+        console.warn("Project metadata sync skipped or failed:", syncErr);
+      }
     } catch (error) {
       console.error(error);
       toast.error("We couldn't generate your pages right now. Your answer is safe — please try again.");

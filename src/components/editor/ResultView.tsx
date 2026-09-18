@@ -70,14 +70,18 @@ export function ResultView({ pages, projectName, onBack, usageInfo }: Props) {
   }, [safeIndex]);
 
   const handleDownloadPdf = async () => {
-    const toastId = toast.loading("Preparing your multi-page PDF...");
+    const toastId = toast.loading(`Preparing PDF (1/${pages.length})...`);
     try {
-      await downloadPdf(pages, name);
+      await downloadPdf(pages, name, (current, total) => {
+        const pct = Math.round((current / total) * 100);
+        toast.loading(`Preparing PDF: page ${current} of ${total} (${pct}%)...`, { id: toastId });
+      });
       toast.success(`Downloaded "${name}.pdf" (${pages.length} page${pages.length > 1 ? "s" : ""})`, {
         id: toastId,
       });
-    } catch {
-      toast.error("Could not create your PDF. Your pages are safe — please try again.", { id: toastId });
+    } catch (err) {
+      console.error("PDF export failed:", err);
+      toast.error("Export could not be completed. Try exporting again or use ZIP export.", { id: toastId });
     }
   };
 
@@ -94,10 +98,13 @@ export function ResultView({ pages, projectName, onBack, usageInfo }: Props) {
   const handleDownloadZip = async () => {
     const toastId = toast.loading(`Packaging ${pages.length} pages into ZIP...`);
     try {
-      await downloadZip(pages, name);
+      await downloadZip(pages, name, (pct) => {
+        toast.loading(`Packaging ZIP: ${pct}% complete...`, { id: toastId });
+      });
       toast.success(`Downloaded all ${pages.length} pages as ZIP`, { id: toastId });
-    } catch {
-      toast.error("Could not create ZIP archive. Please try again.", { id: toastId });
+    } catch (err) {
+      console.error("ZIP export failed:", err);
+      toast.error("Export could not be completed. Try exporting again or use ZIP export.", { id: toastId });
     }
   };
 

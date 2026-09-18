@@ -680,7 +680,10 @@ export async function ensureFontsReady(families: string[]) {
   await document.fonts.ready;
 }
 
-export async function renderPages(input: RenderInput): Promise<RenderedPage[]> {
+export async function renderPages(
+  input: RenderInput,
+  onProgress?: (rendered: number, total: number) => void,
+): Promise<RenderedPage[]> {
   await ensureFontsReady([input.settings.fontFamily]);
   const measurer = document.createElement("canvas").getContext("2d");
   if (!measurer) throw new Error("Canvas rendering is unavailable");
@@ -689,7 +692,9 @@ export async function renderPages(input: RenderInput): Promise<RenderedPage[]> {
   const ink = inkHex(input.settings);
   const seed = hashString(`${input.content}|${input.question ?? ""}|${input.settings.styleId}|${input.settings.fontFamily}`);
 
-  return documentLayout.pages.map((page) => {
+  const renderedPages: RenderedPage[] = [];
+  for (let i = 0; i < totalPages; i++) {
+    const page = documentLayout.pages[i]!;
     const canvas = document.createElement("canvas");
     canvas.width = page.coordinates.pageWidth;
     canvas.height = page.coordinates.pageHeight;
@@ -751,8 +756,16 @@ export async function renderPages(input: RenderInput): Promise<RenderedPage[]> {
     }
 
     if (import.meta.env.DEV && input.debugLayout === true) drawDebug(ctx, page.coordinates, tableBounds);
-    return { canvas, pageNumber: page.pageNumber };
-  });
+    renderedPages.push({ canvas, pageNumber: page.pageNumber });
+
+    onProgress?.(i + 1, totalPages);
+    // Yield every 3 pages so the browser remains responsive and displays smooth progress
+    if (i % 3 === 0 && i > 0 && typeof setTimeout !== "undefined") {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
+  return renderedPages;
 }
 
 export {
