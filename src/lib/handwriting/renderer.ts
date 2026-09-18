@@ -38,6 +38,7 @@ import {
   type PenOptions,
 } from "./pen";
 import { parseMath, layoutMath } from "../math";
+import { layoutGraph } from "../graph";
 
 export interface RenderInput {
   question?: string;
@@ -432,6 +433,22 @@ function drawMathBlock(
   box.draw(ctx, startX, baselineY, settings, random, ink);
 }
 
+function drawGraphBlock(
+  ctx: CanvasRenderingContext2D,
+  placement: Extract<LayoutPage["placements"][number], { type: "graphBlock" }>,
+  settings: HandwritingSettings,
+  coordinates: PageCoordinateSystem,
+  random: () => number,
+  ink: string,
+): void {
+  const box = layoutGraph(placement.definition, coordinates.rulingSpacing);
+  const ruledLineY = getBaseline(coordinates, placement.lineIndex);
+  const topY = ruledLineY - coordinates.rulingSpacing;
+  const startX = coordinates.contentLeft;
+  const graphRng = makeRng(hashString(placement.definition.id || "graph"));
+  box.draw(ctx, startX, topY, settings, graphRng, ink);
+}
+
 function drawTableRow(
   ctx: CanvasRenderingContext2D,
   placement: Extract<LayoutPage["placements"][number], { type: "tableRow" }>,
@@ -622,6 +639,10 @@ export async function renderPageToCanvas(
       drawMathBlock(ctx, placement, input.settings, page.coordinates, random, ink);
       continue;
     }
+    if (placement.type === "graphBlock") {
+      drawGraphBlock(ctx, placement, input.settings, page.coordinates, random, ink);
+      continue;
+    }
     const segments = placement.marker
       ? [...plainSegments(`${placement.marker} `), ...placement.segs]
       : placement.segs;
@@ -702,6 +723,10 @@ export async function renderPages(input: RenderInput): Promise<RenderedPage[]> {
       }
       if (placement.type === "mathBlock") {
         drawMathBlock(ctx, placement, input.settings, page.coordinates, random, ink);
+        continue;
+      }
+      if (placement.type === "graphBlock") {
+        drawGraphBlock(ctx, placement, input.settings, page.coordinates, random, ink);
         continue;
       }
       const segments = placement.marker

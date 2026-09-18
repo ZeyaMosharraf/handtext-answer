@@ -13,11 +13,13 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
+  TrendingUp,
 } from "lucide-react";
 import { Button, Input } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
 import type { FormatState, RichContentEditorHandle } from "./RichContentEditor";
 import { MathFormulaModal } from "./MathFormulaModal";
+import { GraphInsertModal } from "./GraphInsertModal";
 
 export const STUDENT_INKS = [
   { id: "royal", label: "Royal Blue", hex: "#174ea6" },
@@ -54,6 +56,10 @@ interface EditorToolbarProps {
   onOpenInsertMath?: () => void;
   onCloseMathModal?: () => void;
   onMathModalOpenChange?: (open: boolean) => void;
+  graphModalOpen?: boolean;
+  onOpenInsertGraph?: () => void;
+  onCloseGraphModal?: () => void;
+  onGraphModalOpenChange?: (open: boolean) => void;
 }
 
 export function EditorToolbar({
@@ -67,6 +73,10 @@ export function EditorToolbar({
   onOpenInsertMath,
   onCloseMathModal,
   onMathModalOpenChange,
+  graphModalOpen: controlledGraphModalOpen,
+  onOpenInsertGraph,
+  onCloseGraphModal,
+  onGraphModalOpenChange,
 }: EditorToolbarProps) {
   const [colorMenuOpen, setColorMenuOpen] = useState(false);
   const [highlightMenuOpen, setHighlightMenuOpen] = useState(false);
@@ -86,6 +96,19 @@ export function EditorToolbar({
       }
     },
     [onMathModalOpenChange],
+  );
+
+  const [internalGraphModalOpen, setInternalGraphModalOpen] = useState(false);
+  const graphModalOpen = controlledGraphModalOpen !== undefined ? controlledGraphModalOpen : internalGraphModalOpen;
+  const setGraphModalOpen = useCallback(
+    (open: boolean) => {
+      if (onGraphModalOpenChange) {
+        onGraphModalOpenChange(open);
+      } else {
+        setInternalGraphModalOpen(open);
+      }
+    },
+    [onGraphModalOpenChange],
   );
 
   const colorRef = useRef<HTMLDivElement>(null);
@@ -602,6 +625,21 @@ export function EditorToolbar({
         <span className="hidden sm:inline text-xs font-medium">Math</span>
       </Button>
 
+      {/* Graph Button */}
+      <Button
+        id="toolbar-graph"
+        type="button"
+        variant="ghost"
+        size="sm"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onOpenInsertGraph ?? (() => setGraphModalOpen(true))}
+        title="Insert handwritten graph"
+        className="h-8 gap-1.5 px-2 text-xs cursor-pointer"
+      >
+        <TrendingUp className="size-3.5" />
+        <span className="hidden sm:inline text-xs font-medium">Graph</span>
+      </Button>
+
       {/* Clear formatting */}
       <Button
         type="button"
@@ -624,6 +662,13 @@ export function EditorToolbar({
         mode={mathModalMode}
         targetElement={mathTargetElement ?? null}
         editorRef={editorRef}
+      />
+
+      {/* Graph Insert Modal */}
+      <GraphInsertModal
+        isOpen={graphModalOpen}
+        onClose={onCloseGraphModal ?? (() => setGraphModalOpen(false))}
+        onInsert={(definition) => editorRef.current?.insertGraphBlock(definition)}
       />
     </div>
   );

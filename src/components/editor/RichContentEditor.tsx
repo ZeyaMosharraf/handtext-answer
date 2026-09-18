@@ -10,6 +10,7 @@ import {
   setTableColumnAlignment as domSetTableColumnAlignment,
   handleTableTabNavigation,
 } from "@/lib/table-dom";
+import type { GraphDefinition } from "@/lib/graph/types";
 import { cn } from "@/lib/utils";
 
 export interface FormatState {
@@ -51,6 +52,8 @@ export interface RichContentEditorHandle {
   clearActiveMathElement: () => void;
   /** Return the latex of the math-block the cursor is currently in/adjacent to */
   getMathInfo: () => { latex: string } | null;
+  /** Insert a new handwritten graph block at the current cursor position */
+  insertGraphBlock: (definition: GraphDefinition) => void;
   focus: () => void;
   getFormatState: () => FormatState;
 }
@@ -700,6 +703,145 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       return latex ? { latex } : null;
     }, []);
 
+    const insertGraphBlock = useCallback(
+      (definition: GraphDefinition) => {
+        const el = editorRef.current;
+        if (!el) return;
+        el.focus();
+
+        const graphDiv = document.createElement("div");
+        graphDiv.className = "graph-block";
+        const defJson = JSON.stringify(definition);
+        graphDiv.setAttribute("data-graph-definition", defJson);
+        graphDiv.setAttribute("contenteditable", "false");
+        graphDiv.style.cssText =
+          "display:inline-flex;align-items:center;gap:6px;padding:4px 10px;" +
+          "margin:4px 0;border-radius:6px;background:rgba(16,185,129,0.08);" +
+          "border:1px solid rgba(16,185,129,0.25);cursor:pointer;user-select:none;" +
+          "font-family:sans-serif;font-size:0.82em;color:#047857;white-space:nowrap;";
+        const title = definition.title || `${definition.type} graph`;
+        const escTitle = title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        graphDiv.innerHTML = `<span style="opacity:0.7;font-size:1.1em;">📈</span><span>${escTitle}</span>`;
+
+        const createTrailingParagraph = () => {
+          const p = document.createElement("p");
+          p.innerHTML = "<br>";
+          return p;
+        };
+
+        const setCaretInParagraph = (p: HTMLElement) => {
+          const sel = window.getSelection();
+          if (sel) {
+            const range = document.createRange();
+            range.setStart(p, 0);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            savedRangeRef.current = range.cloneRange();
+          }
+        };
+
+        let inserted = false;
+
+        const getEnclosingBlock = (node: Node | null): HTMLElement | null => {
+          let curr: Node | null = node;
+          while (curr && curr !== el) {
+            if (
+              curr.nodeType === 1 &&
+              ((curr as HTMLElement).classList.contains("math-block") ||
+                (curr as HTMLElement).classList.contains("graph-block"))
+            ) {
+              return curr as HTMLElement;
+            }
+            curr = curr.parentNode;
+          }
+          return null;
+        };
+
+        const insertAfterElement = (target: HTMLElement) => {
+          if (target.parentNode) {
+            const trailingP = createTrailingParagraph();
+            if (target.nextSibling) {
+              target.parentNode.insertBefore(graphDiv, target.nextSibling);
+              target.parentNode.insertBefore(trailingP, graphDiv.nextSibling);
+            } else {
+              target.parentNode.appendChild(graphDiv);
+              target.parentNode.appendChild(trailingP);
+            }
+            setCaretInParagraph(trailingP);
+            return true;
+          }
+          return false;
+        };
+
+        // 1. Try saved selection first
+        if (savedRangeRef.current && el.contains(savedRangeRef.current.commonAncestorContainer)) {
+          try {
+            const range = savedRangeRef.current;
+            const enclosing =
+              getEnclosingBlock(range.commonAncestorContainer) ??
+              getEnclosingBlock(range.startContainer);
+            if (enclosing) {
+              inserted = insertAfterElement(enclosing);
+            } else {
+              let targetNode = range.startContainer;
+              if (targetNode.nodeType === 3) targetNode = targetNode.parentNode as Node;
+              const parentBlock = (targetNode as HTMLElement)?.closest?.("p, div");
+              if (
+                parentBlock &&
+                el.contains(parentBlock) &&
+                parentBlock !== el &&
+                (parentBlock.innerHTML === "<br>" || !parentBlock.textContent?.trim())
+              ) {
+                const trailingP = createTrailingParagraph();
+                parentBlock.parentNode?.insertBefore(graphDiv, parentBlock);
+                parentBlock.parentNode?.insertBefore(trailingP, parentBlock);
+                parentBlock.remove();
+                setCaretInParagraph(trailingP);
+                inserted = true;
+              } else {
+                range.deleteContents();
+                range.insertNode(graphDiv);
+                const trailingP = createTrailingParagraph();
+                if (graphDiv.nextSibling) {
+                  graphDiv.parentNode?.insertBefore(trailingP, graphDiv.nextSibling);
+                } else {
+                  graphDiv.parentNode?.appendChild(trailingP);
+                }
+                setCaretInParagraph(trailingP);
+                inserted = true;
+              }
+            }
+          } catch {
+            inserted = false;
+          }
+        }
+
+        // 2. Fallback: append inside editor
+        if (!inserted) {
+          const lastChild = el.lastElementChild;
+          const trailingP = createTrailingParagraph();
+          if (
+            lastChild &&
+            (lastChild.tagName === "P" || lastChild.tagName === "DIV") &&
+            (!lastChild.textContent?.trim() || lastChild.innerHTML === "<br>")
+          ) {
+            lastChild.replaceWith(graphDiv);
+            el.appendChild(trailingP);
+          } else {
+            el.appendChild(graphDiv);
+            el.appendChild(trailingP);
+          }
+          setCaretInParagraph(trailingP);
+          inserted = true;
+        }
+
+        triggerChange();
+        updateFormatState();
+      },
+      [triggerChange, updateFormatState],
+    );
+
     useImperativeHandle(
       ref,
       () => ({
@@ -722,6 +864,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         updateMathBlock,
         clearActiveMathElement,
         getMathInfo,
+        insertGraphBlock,
         focus: () => editorRef.current?.focus(),
         getFormatState: () => formatState,
       }),
@@ -746,6 +889,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         updateMathBlock,
         clearActiveMathElement,
         getMathInfo,
+        insertGraphBlock,
       ],
     );
 

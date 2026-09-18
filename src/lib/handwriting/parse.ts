@@ -1,4 +1,5 @@
 import type { ColumnAlignment } from "./types";
+import type { GraphDefinition } from "../graph/types";
 
 export type BlockKind =
   | "heading"
@@ -10,7 +11,8 @@ export type BlockKind =
   | "divider"
   | "table"
   | "blank"
-  | "math";
+  | "math"
+  | "graph";
 
 /** A run of text sharing the same inline formatting. */
 export interface Seg {
@@ -142,6 +144,11 @@ export interface MathBlockData {
   display: "block" | "inline";
 }
 
+/** Stored in Block.graph when kind === "graph" */
+export interface GraphBlockData {
+  definition: GraphDefinition;
+}
+
 export interface Block {
   kind: BlockKind;
   text: string;
@@ -150,6 +157,8 @@ export interface Block {
   table?: TableData;
   /** Present when kind === "math" */
   math?: MathBlockData;
+  /** Present when kind === "graph" */
+  graph?: GraphBlockData;
 }
 
 export const HIGHLIGHT_COLOR = "#141821"; // strong black ink for emphasis
@@ -349,18 +358,34 @@ export function parseInlineHtml(innerHtml: string): Seg[] {
  * Parses structured HTML from the rich text editor directly into Block[] and Seg[]
  * runs without intermediate markdown syntax or markers. Works universally in browser and Node/SSR.
  */
-export function parseHtmlContent(html: string, mathBlocksMap = new Map<string, string>()): Block[] {
+export function parseHtmlContent(
+  html: string,
+  mathBlocksMap = new Map<string, string>(),
+  graphBlocksMap = new Map<string, string>(),
+): Block[] {
   const blocks: Block[] = [];
 
   // Pre-extract math blocks so nested <div> wrappers in contenteditable never truncate blockRegex
   let mathCounter = mathBlocksMap.size;
-  const tokenizedHtml = html.replace(
+  let tokenizedHtml = html.replace(
     /<div[^>]*class=["'][^"']*math-block[^"']*["'][^>]*data-latex=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>|<div[^>]*data-latex=["']([^"']*)["'][^>]*class=["'][^"']*math-block[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
     (_, latex1, latex2) => {
       const latex = unescapeHtml(latex1 || latex2 || "");
       const token = `__MATH_BLOCK_TOKEN_${mathCounter++}__`;
       mathBlocksMap.set(token, latex);
       return `<p data-math-token="${token}"></p>`;
+    },
+  );
+
+  // Pre-extract graph blocks
+  let graphCounter = graphBlocksMap.size;
+  tokenizedHtml = tokenizedHtml.replace(
+    /<div[^>]*class=["'][^"']*graph-block[^"']*["'][^>]*data-graph-definition=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>|<div[^>]*data-graph-definition=["']([^"']*)["'][^>]*class=["'][^"']*graph-block[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+    (_, def1, def2) => {
+      const defStr = unescapeHtml(def1 || def2 || "");
+      const token = `__GRAPH_BLOCK_TOKEN_${graphCounter++}__`;
+      graphBlocksMap.set(token, defStr);
+      return `<p data-graph-token="${token}"></p>`;
     },
   );
 
@@ -405,6 +430,31 @@ export function parseHtmlContent(html: string, mathBlocksMap = new Map<string, s
         text: latex,
         math: { latex, display: "block" },
       });
+      continue;
+    }
+
+    // Check if the block tag itself is a graph-block token or container
+    const graphTokenMatch = attrs.match(/data-graph-token=["']([^"']*)["']/i);
+    if (graphTokenMatch && graphBlocksMap.has(graphTokenMatch[1]!)) {
+      const defStr = graphBlocksMap.get(graphTokenMatch[1]!)!;
+      try {
+        const definition = JSON.parse(defStr) as GraphDefinition;
+        blocks.push({ kind: "graph", text: defStr, graph: { definition } });
+      } catch {
+        // Silently skip corrupted JSON
+      }
+      continue;
+    }
+
+    const graphAttrMatch = attrs.match(/data-graph-definition=["']([^"']*)["']/i);
+    if (graphAttrMatch || (tag === "div" && attrs.includes("graph-block"))) {
+      const defStr = graphAttrMatch ? unescapeHtml(graphAttrMatch[1] ?? "") : inner.trim();
+      try {
+        const definition = JSON.parse(defStr) as GraphDefinition;
+        blocks.push({ kind: "graph", text: defStr, graph: { definition } });
+      } catch {
+        // Silently skip corrupted JSON
+      }
       continue;
     }
 
@@ -528,7 +578,7 @@ export function parseHtmlContent(html: string, mathBlocksMap = new Map<string, s
     }
 
     if (tag === "div" && /<(h1|h2|h3|h4|blockquote|hr|table|ul|ol|p|div|pre)\b/i.test(inner)) {
-      blocks.push(...parseHtmlContent(inner, mathBlocksMap));
+      blocks.push(...parseHtmlContent(inner, mathBlocksMap, graphBlocksMap));
       continue;
     }
 
@@ -559,6 +609,47 @@ export function parseHtmlContent(html: string, mathBlocksMap = new Map<string, s
             blocks.push({ kind: "math", text: latex, math: { latex, display: "block" } });
           }
           lastInnerIdx = mathPattern.lastIndex;
+        }
+        const afterHtml = inner.slice(lastInnerIdx);
+        const afterSegs = parseInlineHtml(afterHtml);
+        const afterText = segText(afterSegs).trim();
+        if (afterText) {
+          blocks.push({ kind: "paragraph", text: segText(afterSegs), segs: afterSegs });
+        }
+        continue;
+      }
+
+      // Check if inner contains nested graph-block elements or graph tokens
+      if (inner.includes("data-graph-token") || inner.includes("graph-block") || inner.includes("data-graph-definition")) {
+        const graphPattern =
+          /<p[^>]*data-graph-token=["']([^"']*)["'][^>]*><\/p>|<div[^>]*?(?:class=["'][^"']*graph-block[^"']*["']|data-graph-definition=["']([^"']*)["'])[^>]*>[\s\S]*?<\/div>/gi;
+        let lastInnerIdx = 0;
+        let gMatch: RegExpExecArray | null;
+        while ((gMatch = graphPattern.exec(inner)) !== null) {
+          const beforeHtml = inner.slice(lastInnerIdx, gMatch.index);
+          const beforeSegs = parseInlineHtml(beforeHtml);
+          const beforeText = segText(beforeSegs).trim();
+          if (beforeText) {
+            blocks.push({ kind: "paragraph", text: segText(beforeSegs), segs: beforeSegs });
+          }
+          let defStr = "";
+          const token = gMatch[1];
+          if (token && graphBlocksMap.has(token)) {
+            defStr = graphBlocksMap.get(token)!;
+          } else {
+            const divTag = gMatch[0];
+            const dMatch = divTag.match(/data-graph-definition=["']([^"']*)["']/i);
+            defStr = dMatch ? unescapeHtml(dMatch[1] ?? "") : "";
+          }
+          if (defStr) {
+            try {
+              const definition = JSON.parse(defStr) as GraphDefinition;
+              blocks.push({ kind: "graph", text: defStr, graph: { definition } });
+            } catch {
+              // Silently skip corrupted JSON
+            }
+          }
+          lastInnerIdx = graphPattern.lastIndex;
         }
         const afterHtml = inner.slice(lastInnerIdx);
         const afterSegs = parseInlineHtml(afterHtml);
@@ -831,6 +922,17 @@ export function blocksToHtml(blocks: Block[]): string {
         );
         break;
       }
+      case "graph": {
+        const def = b.graph?.definition;
+        const defJson = def ? JSON.stringify(def) : b.text;
+        const escDef = defJson.replace(/"/g, "&quot;");
+        const title = def?.title || `${def?.type ?? "graph"} graph`;
+        const escTitle = title.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        parts.push(
+          `<div class="graph-block" data-graph-definition="${escDef}" contenteditable="false" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;margin:4px 0;border-radius:6px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);cursor:pointer;user-select:none;font-family:sans-serif;font-size:0.82em;color:#047857;white-space:nowrap;"><span style="opacity:0.7;font-size:1.1em;">📈</span><span>${escTitle}</span></div>`,
+        );
+        break;
+      }
       case "paragraph":
       default:
         parts.push(`<p>${segsToHtml(b.segs)}</p>`);
@@ -889,7 +991,11 @@ export function htmlToPlainText(html: string): string {
     /<div[^>]*class=["'][^"']*math-block[^"']*["'][^>]*data-latex=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>/gi,
     (_, latex) => `\n$$\n${unescapeHtml(latex)}\n$$\n`,
   );
-  const withLineBreaks = withMath
+  const withGraph = withMath.replace(
+    /<div[^>]*class=["'][^"']*graph-block[^"']*["'][^>]*data-graph-definition=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>/gi,
+    () => `\n[Graph]\n`,
+  );
+  const withLineBreaks = withGraph
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|h[1-6]|li|tr|blockquote|pre)>/gi, "\n")
     .replace(/<hr\s*\/?>/gi, "\n---\n");

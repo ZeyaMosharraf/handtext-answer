@@ -9,6 +9,7 @@ import {
 } from "./types";
 import { resolveEffectiveBand } from "./band-operations";
 import { parseMath, layoutMath, computeLineUnits } from "../math";
+import { layoutGraph, type GraphDefinition } from "../graph";
 
 export interface PageCoordinateSystem {
   pageWidth: number;
@@ -60,6 +61,12 @@ export interface LayoutMathBlock {
   latex: string;
 }
 
+export interface LayoutGraphBlock {
+  type: "graphBlock";
+  lineIndex: number;
+  lineUnits: number;
+  definition: GraphDefinition;
+}
 
 export interface LayoutTableBounds {
   tableId: number;
@@ -69,7 +76,7 @@ export interface LayoutTableBounds {
   bottom: number;
 }
 
-export type LayoutPlacement = LayoutLine | LayoutTableRow | LayoutMathBlock;
+export type LayoutPlacement = LayoutLine | LayoutTableRow | LayoutMathBlock | LayoutGraphBlock;
 
 export interface LayoutPage {
   pageNumber: number;
@@ -112,7 +119,14 @@ interface FlowMathBlock {
   gapLines: number;
 }
 
-type FlowItem = FlowLine | FlowTableRow | FlowMathBlock;
+interface FlowGraphBlock {
+  type: "graphBlock";
+  definition: GraphDefinition;
+  lineUnits: number;
+  gapLines: number;
+}
+
+type FlowItem = FlowLine | FlowTableRow | FlowMathBlock | FlowGraphBlock;
 
 const KIND_SCALE: Record<BlockKind, number> = {
   heading: 1.22,
@@ -125,6 +139,7 @@ const KIND_SCALE: Record<BlockKind, number> = {
   table: 1,
   blank: 1,
   math: 1,
+  graph: 1,
 };
 
 export function bandApplies(band: BandConfig, pageNumber: number, totalPages: number) {
@@ -601,6 +616,17 @@ function mathFlowBlock(
   return [{ type: "mathBlock", latex, lineUnits, gapLines: 0 }];
 }
 
+function graphFlowBlock(
+  block: Block,
+  settings: HandwritingSettings,
+): FlowGraphBlock[] {
+  const definition = block.graph?.definition;
+  if (!definition) return [];
+  const rulingSpacing = settings.fontSize * settings.lineSpacing;
+  const box = layoutGraph(definition, rulingSpacing);
+  return [{ type: "graphBlock", definition, lineUnits: box.lineUnits, gapLines: 0 }];
+}
+
 function buildFlow(
   ctx: CanvasRenderingContext2D,
   content: string,
@@ -643,6 +669,8 @@ function buildFlow(
       ? tableRows(ctx, block, settings, contentWidth, tableId++)
       : block.kind === "math"
       ? mathFlowBlock(block, settings, ctx)
+      : block.kind === "graph"
+      ? graphFlowBlock(block, settings)
       : blockLines(ctx, block, settings, contentWidth);
     if (laid.length === 0) continue;
     laid[0]!.gapLines = pendingGapLines;
@@ -736,6 +764,8 @@ function paginate(
       });
     } else if (item.type === "mathBlock") {
       placements.push({ type: "mathBlock", lineIndex, lineUnits: item.lineUnits, latex: item.latex });
+    } else if (item.type === "graphBlock") {
+      placements.push({ type: "graphBlock", lineIndex, lineUnits: item.lineUnits, definition: item.definition });
     } else {
       placements.push({ ...item, lineIndex });
     }
