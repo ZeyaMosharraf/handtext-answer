@@ -104,12 +104,22 @@ export function useDocumentBlocks({
     onChangeRef.current = onChange;
   }, [onChange]);
 
-  const commitBlocks = useCallback(
-    (newBlocks: DocumentBlock[], addToHistory: boolean = true) => {
-      const sanitized = newBlocks.length === 0 ? [createEmptyTextBlock()] : newBlocks;
+  // Synchronized ref to always access latest blocks in callbacks
+  const blocksRef = useRef<DocumentBlock[]>(blocks);
+  blocksRef.current = blocks;
+
+  // Single mutation helper to record history and emit changes cleanly outside setState updaters
+  const applyMutation = useCallback(
+    (
+      getNextBlocks: (current: DocumentBlock[]) => DocumentBlock[],
+      addToHistory = true
+    ): DocumentBlock[] => {
+      const current = blocksRef.current;
+      const next = getNextBlocks(current);
+      const sanitized = next.length === 0 ? [createEmptyTextBlock()] : next;
 
       if (addToHistory) {
-        historyRef.current.past.push(blocks);
+        historyRef.current.past.push(current);
         if (historyRef.current.past.length > maxHistory) {
           historyRef.current.past.shift();
         }
@@ -117,119 +127,60 @@ export function useDocumentBlocks({
         setHistoryVersion((v) => v + 1);
       }
 
+      blocksRef.current = sanitized;
       setBlocksState(sanitized);
 
       if (onChangeRef.current) {
-        const html = blocksToHtml(sanitized);
-        onChangeRef.current(sanitized, html);
+        onChangeRef.current(sanitized, blocksToHtml(sanitized));
       }
+
+      return sanitized;
     },
-    [blocks, maxHistory]
+    [maxHistory]
   );
 
   // ─── Block Mutations ────────────────────────────────────────────────────────
 
   const setBlocks = useCallback(
     (newBlocks: DocumentBlock[]) => {
-      commitBlocks(newBlocks, true);
+      applyMutation(() => newBlocks, true);
     },
-    [commitBlocks]
+    [applyMutation]
   );
 
   const insertBlock = useCallback(
     (block: DocumentBlock, afterId?: string | null) => {
-      setBlocksState((currentBlocks) => {
-        const nextBlocks = insertBlockOp(currentBlocks, block, afterId);
-
-        historyRef.current.past.push(currentBlocks);
-        if (historyRef.current.past.length > maxHistory) {
-          historyRef.current.past.shift();
-        }
-        historyRef.current.future = [];
-        setHistoryVersion((v) => v + 1);
-
-        if (onChangeRef.current) {
-          onChangeRef.current(nextBlocks, blocksToHtml(nextBlocks));
-        }
-
-        return nextBlocks;
-      });
-
+      applyMutation((current) => insertBlockOp(current, block, afterId), true);
       setSelectedBlockId(block.id);
     },
-    [maxHistory]
+    [applyMutation]
   );
 
   const updateBlock = useCallback(
     <T extends DocumentBlock>(id: string, updates: Partial<T>) => {
-      setBlocksState((currentBlocks) => {
-        const nextBlocks = updateBlockOp(currentBlocks, id, updates);
-
-        historyRef.current.past.push(currentBlocks);
-        if (historyRef.current.past.length > maxHistory) {
-          historyRef.current.past.shift();
-        }
-        historyRef.current.future = [];
-        setHistoryVersion((v) => v + 1);
-
-        if (onChangeRef.current) {
-          onChangeRef.current(nextBlocks, blocksToHtml(nextBlocks));
-        }
-
-        return nextBlocks;
-      });
+      applyMutation((current) => updateBlockOp(current, id, updates), true);
     },
-    [maxHistory]
+    [applyMutation]
   );
 
   const deleteBlock = useCallback(
     (id: string) => {
-      setBlocksState((currentBlocks) => {
-        const { blocks: nextBlocks, nextSelectedId } = deleteBlockOp(
-          currentBlocks,
-          id,
-          selectedBlockId
-        );
-
-        setSelectedBlockId(nextSelectedId);
-
-        historyRef.current.past.push(currentBlocks);
-        if (historyRef.current.past.length > maxHistory) {
-          historyRef.current.past.shift();
-        }
-        historyRef.current.future = [];
-        setHistoryVersion((v) => v + 1);
-
-        if (onChangeRef.current) {
-          onChangeRef.current(nextBlocks, blocksToHtml(nextBlocks));
-        }
-
-        return nextBlocks;
-      });
+      let nextSelectedId: string | null = null;
+      applyMutation((current) => {
+        const op = deleteBlockOp(current, id, selectedBlockId);
+        nextSelectedId = op.nextSelectedId;
+        return op.blocks;
+      }, true);
+      setSelectedBlockId(nextSelectedId);
     },
-    [maxHistory, selectedBlockId]
+    [applyMutation, selectedBlockId]
   );
 
   const moveBlock = useCallback(
     (id: string, direction: "up" | "down") => {
-      setBlocksState((currentBlocks) => {
-        const nextBlocks = moveBlockOp(currentBlocks, id, direction);
-
-        historyRef.current.past.push(currentBlocks);
-        if (historyRef.current.past.length > maxHistory) {
-          historyRef.current.past.shift();
-        }
-        historyRef.current.future = [];
-        setHistoryVersion((v) => v + 1);
-
-        if (onChangeRef.current) {
-          onChangeRef.current(nextBlocks, blocksToHtml(nextBlocks));
-        }
-
-        return nextBlocks;
-      });
+      applyMutation((current) => moveBlockOp(current, id, direction), true);
     },
-    [maxHistory]
+    [applyMutation]
   );
 
   const splitTextBlock = useCallback(
@@ -240,37 +191,26 @@ export function useDocumentBlocks({
     ): { beforeBlock: TextBlock; afterBlock: TextBlock } | null => {
       let result: { beforeBlock: TextBlock; afterBlock: TextBlock } | null = null;
 
-      setBlocksState((currentBlocks) => {
+      applyMutation((current) => {
         const opResult = splitTextBlockOp(
-          currentBlocks,
+          current,
           id,
           splitHtmlBefore,
           splitHtmlAfter
         );
-        if (!opResult) return currentBlocks;
+        if (!opResult) return current;
 
         result = {
           beforeBlock: opResult.beforeBlock,
           afterBlock: opResult.afterBlock,
         };
 
-        historyRef.current.past.push(currentBlocks);
-        if (historyRef.current.past.length > maxHistory) {
-          historyRef.current.past.shift();
-        }
-        historyRef.current.future = [];
-        setHistoryVersion((v) => v + 1);
-
-        if (onChangeRef.current) {
-          onChangeRef.current(opResult.blocks, blocksToHtml(opResult.blocks));
-        }
-
         return opResult.blocks;
-      });
+      }, true);
 
       return result;
     },
-    [maxHistory]
+    [applyMutation]
   );
 
   // ─── Selection ──────────────────────────────────────────────────────────────
@@ -292,42 +232,46 @@ export function useDocumentBlocks({
     if (historyRef.current.past.length === 0) return;
 
     const previousBlocks = historyRef.current.past.pop()!;
-    historyRef.current.future.push(blocks);
+    historyRef.current.future.push(blocksRef.current);
     setHistoryVersion((v) => v + 1);
 
+    blocksRef.current = previousBlocks;
     setBlocksState(previousBlocks);
+    setSelectedBlockId(null);
 
     if (onChangeRef.current) {
       onChangeRef.current(previousBlocks, blocksToHtml(previousBlocks));
     }
-  }, [blocks]);
+  }, []);
 
   const redo = useCallback(() => {
     if (historyRef.current.future.length === 0) return;
 
     const nextBlocks = historyRef.current.future.pop()!;
-    historyRef.current.past.push(blocks);
+    historyRef.current.past.push(blocksRef.current);
     setHistoryVersion((v) => v + 1);
 
+    blocksRef.current = nextBlocks;
     setBlocksState(nextBlocks);
+    setSelectedBlockId(null);
 
     if (onChangeRef.current) {
       onChangeRef.current(nextBlocks, blocksToHtml(nextBlocks));
     }
-  }, [blocks]);
+  }, []);
 
   // ─── Serialization Helpers ──────────────────────────────────────────────────
 
   const toHtml = useCallback(() => {
-    return blocksToHtml(blocks);
-  }, [blocks]);
+    return blocksToHtml(blocksRef.current);
+  }, []);
 
   const loadFromHtml = useCallback(
     (html: string) => {
       const parsedBlocks = htmlToBlocks(html);
-      commitBlocks(parsedBlocks, true);
+      applyMutation(() => parsedBlocks, false);
     },
-    [commitBlocks]
+    [applyMutation]
   );
 
   return {

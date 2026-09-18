@@ -234,7 +234,7 @@ export function isHtmlContent(raw: string): boolean {
   return /<\s*(p|h1|h2|h3|ul|ol|table|blockquote|hr|div|span|strong|b|em|i|u|pre)\b/i.test(raw);
 }
 
-function unescapeHtml(str: string): string {
+export function unescapeHtml(str: string): string {
   return str
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
@@ -243,6 +243,10 @@ function unescapeHtml(str: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ")
     .replace(/\u00A0/g, " ");
+}
+
+export function plainSegments(text: string): Seg[] {
+  return text ? [{ text, bold: false, underline: false, italic: false }] : [];
 }
 
 /** Parses inline HTML text runs into structured Seg[] */
@@ -354,6 +358,43 @@ export function parseInlineHtml(innerHtml: string): Seg[] {
   return merged.length ? merged : [{ text: "", bold: false, underline: false, italic: false }];
 }
 
+function stripTextBlockWrappers(html: string): string {
+  let res = html;
+  const openRe = /<div[^>]*data-block-type=["']text["'][^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = openRe.exec(res)) !== null) {
+    const startIdx = match.index;
+    const tagLen = match[0].length;
+    let depth = 1;
+    let cursor = startIdx + tagLen;
+    const innerTagRe = /<\/?div\b[^>]*>/gi;
+    innerTagRe.lastIndex = cursor;
+    let innerMatch: RegExpExecArray | null;
+    let endIdx = -1;
+    let closeLen = 0;
+    while ((innerMatch = innerTagRe.exec(res)) !== null) {
+      if (innerMatch[0].startsWith("</")) {
+        depth--;
+        if (depth === 0) {
+          endIdx = innerMatch.index;
+          closeLen = innerMatch[0].length;
+          break;
+        }
+      } else {
+        depth++;
+      }
+    }
+    if (endIdx !== -1) {
+      const innerContent = res.slice(startIdx + tagLen, endIdx);
+      res = res.slice(0, startIdx) + "\n" + innerContent + "\n" + res.slice(endIdx + closeLen);
+      openRe.lastIndex = startIdx;
+    } else {
+      break;
+    }
+  }
+  return res;
+}
+
 /**
  * Parses structured HTML from the rich text editor directly into Block[] and Seg[]
  * runs without intermediate markdown syntax or markers. Works universally in browser and Node/SSR.
@@ -365,10 +406,13 @@ export function parseHtmlContent(
 ): Block[] {
   const blocks: Block[] = [];
 
+  // Unwrap any top-level text block container divs so nested div boundaries never truncate regex
+  const unwrappedHtml = stripTextBlockWrappers(html);
+
   // Pre-extract math blocks so nested <div> wrappers in contenteditable never truncate blockRegex
   let mathCounter = mathBlocksMap.size;
-  let tokenizedHtml = html.replace(
-    /<div[^>]*class=["'][^"']*math-block[^"']*["'][^>]*data-latex=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>|<div[^>]*data-latex=["']([^"']*)["'][^>]*class=["'][^"']*math-block[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+  let tokenizedHtml = unwrappedHtml.replace(
+    /<div[^>]*?(?:class=["'][^"']*math-block[^"']*["']|data-block-type=["']math["'])[^>]*data-latex=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>|<div[^>]*data-latex=["']([^"']*)["'][^>]*?(?:class=["'][^"']*math-block[^"']*["']|data-block-type=["']math["'])[^>]*>[\s\S]*?<\/div>/gi,
     (_, latex1, latex2) => {
       const latex = unescapeHtml(latex1 || latex2 || "");
       const token = `__MATH_BLOCK_TOKEN_${mathCounter++}__`;
@@ -380,7 +424,7 @@ export function parseHtmlContent(
   // Pre-extract graph blocks
   let graphCounter = graphBlocksMap.size;
   tokenizedHtml = tokenizedHtml.replace(
-    /<div[^>]*class=["'][^"']*graph-block[^"']*["'][^>]*data-graph-definition=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>|<div[^>]*data-graph-definition=["']([^"']*)["'][^>]*class=["'][^"']*graph-block[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+    /<div[^>]*?(?:class=["'][^"']*graph-block[^"']*["']|data-block-type=["']graph["'])[^>]*data-graph-definition=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>|<div[^>]*data-graph-definition=["']([^"']*)["'][^>]*?(?:class=["'][^"']*graph-block[^"']*["']|data-block-type=["']graph["'])[^>]*>[\s\S]*?<\/div>/gi,
     (_, def1, def2) => {
       const defStr = unescapeHtml(def1 || def2 || "");
       const token = `__GRAPH_BLOCK_TOKEN_${graphCounter++}__`;
@@ -397,9 +441,10 @@ export function parseHtmlContent(
   let match: RegExpExecArray | null;
 
   while ((match = blockRegex.exec(tokenizedHtml)) !== null) {
-    // Check if there was non-empty text before this block
-    const prevText = unescapeHtml(tokenizedHtml.slice(lastIndex, match.index).replace(/<[^>]+>/g, "")).trim();
-    if (prevText) {
+    // Check if there was non-empty text before this block (preserving spaces & indentation)
+    const rawPrev = unescapeHtml(tokenizedHtml.slice(lastIndex, match.index).replace(/<[^>]+>/g, ""));
+    if (rawPrev.trim()) {
+      const prevText = rawPrev.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/^\n+|\n+$/g, "");
       blocks.push({
         kind: "paragraph",
         text: prevText,
@@ -677,8 +722,9 @@ export function parseHtmlContent(
   }
 
   // Handle trailing content if any
-  const trailing = unescapeHtml(tokenizedHtml.slice(lastIndex).replace(/<[^>]+>/g, "")).trim();
-  if (trailing) {
+  const rawTrailing = unescapeHtml(tokenizedHtml.slice(lastIndex).replace(/<[^>]+>/g, ""));
+  const trailing = rawTrailing.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/^\n+|\n+$/g, "");
+  if (trailing.trim()) {
     blocks.push({
       kind: "paragraph",
       text: trailing,
@@ -987,12 +1033,13 @@ export function tableToMarkdown(table: TableData): string {
 export function htmlToPlainText(html: string): string {
   if (!html) return "";
   if (!isHtmlContent(html)) return html;
-  const withMath = html.replace(
-    /<div[^>]*class=["'][^"']*math-block[^"']*["'][^>]*data-latex=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>/gi,
+  const unnested = stripTextBlockWrappers(html);
+  const withMath = unnested.replace(
+    /<div[^>]*?(?:class=["'][^"']*math-block[^"']*["']|data-block-type=["']math["'])[^>]*data-latex=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>/gi,
     (_, latex) => `\n$$\n${unescapeHtml(latex)}\n$$\n`,
   );
   const withGraph = withMath.replace(
-    /<div[^>]*class=["'][^"']*graph-block[^"']*["'][^>]*data-graph-definition=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>/gi,
+    /<div[^>]*?(?:class=["'][^"']*graph-block[^"']*["']|data-block-type=["']graph["'])[^>]*data-graph-definition=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>/gi,
     () => `\n[Graph]\n`,
   );
   const withLineBreaks = withGraph

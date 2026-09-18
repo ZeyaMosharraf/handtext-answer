@@ -15,7 +15,7 @@ export interface GraphInsertModalProps {
   isOpen: boolean;
   onClose: () => void;
   onInsert: (definition: GraphDefinition) => void;
-  initialDefinition?: GraphDefinition;
+  initialDefinition?: GraphDefinition | undefined;
 }
 
 interface PointRow {

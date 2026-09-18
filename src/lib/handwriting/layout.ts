@@ -665,7 +665,8 @@ function buildFlow(
       pendingGapLines = 0;
       continue;
     }
-    const laid = block.kind === "table"
+    const isTable = block.kind === "table";
+    const laid = isTable
       ? tableRows(ctx, block, settings, contentWidth, tableId++)
       : block.kind === "math"
       ? mathFlowBlock(block, settings, ctx)
@@ -673,7 +674,10 @@ function buildFlow(
       ? graphFlowBlock(block, settings)
       : blockLines(ctx, block, settings, contentWidth);
     if (laid.length === 0) continue;
-    laid[0]!.gapLines = pendingGapLines;
+    // Notebook tables begin one rule above their first text baseline (top = lineIndex - 1).
+    // When following other content, guarantee at least 1 gap line so the top border
+    // never collides with or overlaps the preceding text line.
+    laid[0]!.gapLines = isTable && flow.length > 0 ? Math.max(pendingGapLines, 1) : pendingGapLines;
     pendingGapLines = 0;
     flow.push(...laid);
   }

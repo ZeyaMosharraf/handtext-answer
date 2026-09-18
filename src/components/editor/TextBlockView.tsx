@@ -36,6 +36,15 @@ export interface TextBlockViewProps {
   className?: string | undefined;
 }
 
+function sanitizeTextHtml(raw: string | undefined): string {
+  if (!raw) return "<p><br></p>";
+  let clean = raw;
+  while (/^<div[^>]*data-block-type=["']text["'][^>]*>([\s\S]*)<\/div>$/i.test(clean.trim())) {
+    clean = clean.trim().replace(/^<div[^>]*data-block-type=["']text["'][^>]*>/i, "").replace(/<\/div>$/i, "");
+  }
+  return clean || "<p><br></p>";
+}
+
 export const TextBlockView = forwardRef<TextBlockViewHandle, TextBlockViewProps>(
   (
     {
@@ -53,7 +62,8 @@ export const TextBlockView = forwardRef<TextBlockViewHandle, TextBlockViewProps>
     ref
   ) => {
     const elRef = useRef<HTMLDivElement>(null);
-    const lastHtmlRef = useRef<string>(block.html);
+    const initialHtmlRef = useRef<string>(sanitizeTextHtml(block.html));
+    const lastHtmlRef = useRef<string>(sanitizeTextHtml(block.html));
     const isInternalChangeRef = useRef(false);
 
     useImperativeHandle(
@@ -80,15 +90,23 @@ export const TextBlockView = forwardRef<TextBlockViewHandle, TextBlockViewProps>
       []
     );
 
-    // Sync external changes into DOM only if changed externally
+    // Sync external changes into DOM only when NOT focused and actually different
     useEffect(() => {
-      if (isInternalChangeRef.current) {
-        isInternalChangeRef.current = false;
+      const el = elRef.current;
+      if (!el) return;
+
+      // If user is actively typing/focused inside this block, the DOM is the active source of truth.
+      // NEVER overwrite innerHTML while focused, as that destroys selection and resets caret to 0!
+      const isFocused = document.activeElement === el || el.contains(document.activeElement);
+      if (isFocused) {
+        lastHtmlRef.current = el.innerHTML;
         return;
       }
-      if (elRef.current && elRef.current.innerHTML !== block.html) {
-        elRef.current.innerHTML = block.html || "<p><br></p>";
-        lastHtmlRef.current = block.html;
+
+      const sanitized = sanitizeTextHtml(block.html);
+      if (el.innerHTML !== sanitized) {
+        el.innerHTML = sanitized;
+        lastHtmlRef.current = sanitized;
       }
     }, [block.html]);
 
@@ -97,8 +115,16 @@ export const TextBlockView = forwardRef<TextBlockViewHandle, TextBlockViewProps>
       const newHtml = elRef.current.innerHTML;
       if (newHtml !== lastHtmlRef.current) {
         lastHtmlRef.current = newHtml;
-        isInternalChangeRef.current = true;
         onChange(newHtml);
+      }
+    }, [onChange]);
+
+    const handleBlur = useCallback(() => {
+      if (!elRef.current) return;
+      const currentHtml = elRef.current.innerHTML;
+      if (currentHtml !== lastHtmlRef.current) {
+        lastHtmlRef.current = currentHtml;
+        onChange(currentHtml);
       }
     }, [onChange]);
 
@@ -140,15 +166,6 @@ export const TextBlockView = forwardRef<TextBlockViewHandle, TextBlockViewProps>
           }
         }
 
-        // Enter at end of block -> create new text block
-        if (e.key === "Enter" && !e.shiftKey) {
-          if (isAtEnd && onEnterAtEnd) {
-            e.preventDefault();
-            onEnterAtEnd();
-            return;
-          }
-        }
-
         // Arrow Up at start -> navigate to previous block
         if (e.key === "ArrowUp" && isAtStart && onArrowUpAtStart) {
           e.preventDefault();
@@ -163,7 +180,7 @@ export const TextBlockView = forwardRef<TextBlockViewHandle, TextBlockViewProps>
           return;
         }
       },
-      [onBackspaceAtStart, onEnterAtEnd, onArrowUpAtStart, onArrowDownAtEnd]
+      [onBackspaceAtStart, onArrowUpAtStart, onArrowDownAtEnd]
     );
 
     return (
@@ -175,15 +192,14 @@ export const TextBlockView = forwardRef<TextBlockViewHandle, TextBlockViewProps>
         data-block-type="text"
         onClick={onSelect}
         onInput={handleInput}
+        onBlur={handleBlur}
         onKeyDown={handleKeyDown}
         data-placeholder={placeholder}
         className={cn(
-          "text-block-view relative min-h-[1.5em] w-full outline-none py-1 px-1 transition-all rounded-sm",
-          "focus:outline-none focus:ring-1 focus:ring-primary/20",
-          isSelected && "bg-primary/5 ring-1 ring-primary/40",
+          "text-block-view relative w-full outline-none leading-relaxed cursor-text whitespace-pre-wrap [overflow-wrap:anywhere]",
           className
         )}
-        dangerouslySetInnerHTML={{ __html: block.html || "<p><br></p>" }}
+        dangerouslySetInnerHTML={{ __html: initialHtmlRef.current }}
       />
     );
   }

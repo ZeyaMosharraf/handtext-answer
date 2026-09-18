@@ -12,13 +12,14 @@
 import React from "react";
 import type { GraphBlock } from "@/types/document";
 import { cn } from "@/lib/utils";
-import { Trash2, TrendingUp } from "lucide-react";
+import { Pencil, Trash2, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/primitives";
 
 export interface GraphBlockViewProps {
   block: GraphBlock;
   isSelected?: boolean;
   onSelect?: () => void;
+  onEdit?: () => void;
   onDelete?: () => void;
   className?: string;
 }
@@ -27,6 +28,7 @@ export const GraphBlockView: React.FC<GraphBlockViewProps> = ({
   block,
   isSelected,
   onSelect,
+  onEdit,
   onDelete,
   className,
 }) => {
@@ -45,10 +47,17 @@ export const GraphBlockView: React.FC<GraphBlockViewProps> = ({
         e.stopPropagation();
         onSelect?.();
       }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onEdit?.();
+      }}
       onKeyDown={(e) => {
         if (isSelected && (e.key === "Backspace" || e.key === "Delete")) {
           e.preventDefault();
           onDelete?.();
+        } else if (isSelected && e.key === "Enter") {
+          e.preventDefault();
+          onEdit?.();
         }
       }}
       className={cn(
@@ -70,19 +79,36 @@ export const GraphBlockView: React.FC<GraphBlockViewProps> = ({
           </span>
         </div>
 
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete?.();
-          }}
-          title="Delete graph"
-          className="h-6 px-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive cursor-pointer opacity-80 group-hover:opacity-100"
-        >
-          <Trash2 className="size-3" />
-        </Button>
+        <div className="flex items-center gap-1">
+          {onEdit && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit?.();
+              }}
+              title="Edit graph"
+              className="h-6 px-1.5 text-muted-foreground hover:bg-primary/10 hover:text-primary cursor-pointer opacity-80 group-hover:opacity-100"
+            >
+              <Pencil className="size-3" />
+            </Button>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete?.();
+            }}
+            title="Delete graph"
+            className="h-6 px-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive cursor-pointer opacity-80 group-hover:opacity-100"
+          >
+            <Trash2 className="size-3" />
+          </Button>
+        </div>
       </div>
 
       <div className="rounded border border-dashed border-border/80 bg-background/50 p-3 text-center text-xs text-muted-foreground">

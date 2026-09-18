@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import type { FormatState, RichContentEditorHandle } from "./RichContentEditor";
 import { MathFormulaModal } from "./MathFormulaModal";
 import { GraphInsertModal } from "./GraphInsertModal";
+import type { GraphDefinition } from "@/lib/graph/types";
 
 export const STUDENT_INKS = [
   { id: "royal", label: "Royal Blue", hex: "#174ea6" },
@@ -57,6 +58,9 @@ interface EditorToolbarProps {
   onCloseMathModal?: () => void;
   onMathModalOpenChange?: (open: boolean) => void;
   graphModalOpen?: boolean;
+  graphModalMode?: "insert" | "edit";
+  graphInitialDefinition?: GraphDefinition | undefined;
+  graphTargetBlockId?: string | null | undefined;
   onOpenInsertGraph?: () => void;
   onCloseGraphModal?: () => void;
   onGraphModalOpenChange?: (open: boolean) => void;
@@ -74,6 +78,9 @@ export function EditorToolbar({
   onCloseMathModal,
   onMathModalOpenChange,
   graphModalOpen: controlledGraphModalOpen,
+  graphModalMode = "insert",
+  graphInitialDefinition,
+  graphTargetBlockId,
   onOpenInsertGraph,
   onCloseGraphModal,
   onGraphModalOpenChange,
@@ -668,7 +675,14 @@ export function EditorToolbar({
       <GraphInsertModal
         isOpen={graphModalOpen}
         onClose={onCloseGraphModal ?? (() => setGraphModalOpen(false))}
-        onInsert={(definition) => editorRef.current?.insertGraphBlock(definition)}
+        initialDefinition={graphInitialDefinition}
+        onInsert={(definition) => {
+          if (graphModalMode === "edit" && graphTargetBlockId) {
+            editorRef.current?.updateGraphBlock(definition, graphTargetBlockId);
+          } else {
+            editorRef.current?.insertGraphBlock(definition);
+          }
+        }}
       />
     </div>
   );

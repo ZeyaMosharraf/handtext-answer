@@ -28,6 +28,7 @@ export interface BlockListContainerProps {
   onDeleteBlock: (id: string) => void;
   onInsertBlockAfter: (block: DocumentBlock, afterId: string | null) => void;
   onEditMathBlock?: ((block: MathBlock) => void) | undefined;
+  onEditGraphBlock?: ((block: GraphBlock) => void) | undefined;
   onTableSelectionChange?: ((info: TableSelectionInfo | null) => void) | undefined;
   focusTargetBlockId?: string | null | undefined;
   onFocusHandled?: (() => void) | undefined;
@@ -43,6 +44,7 @@ export const BlockListContainer: React.FC<BlockListContainerProps> = ({
   onDeleteBlock,
   onInsertBlockAfter,
   onEditMathBlock,
+  onEditGraphBlock,
   onTableSelectionChange,
   focusTargetBlockId,
   onFocusHandled,
@@ -147,7 +149,7 @@ export const BlockListContainer: React.FC<BlockListContainerProps> = ({
   return (
     <div
       onClick={handleContainerClick}
-      className={cn("block-list-container flex flex-col gap-1 min-h-full cursor-text pb-16", className)}
+      className={cn("block-list-container flex flex-col min-h-full cursor-text pb-16", className)}
     >
       {blocks.map((block) => {
         const isSelected = selectedBlockId === block.id;
@@ -208,6 +210,7 @@ export const BlockListContainer: React.FC<BlockListContainerProps> = ({
                 block={block as GraphBlock}
                 isSelected={isSelected}
                 onSelect={() => onSelectBlock(block.id)}
+                onEdit={() => onEditGraphBlock?.(block as GraphBlock)}
                 onDelete={() => onDeleteBlock(block.id)}
               />
             );

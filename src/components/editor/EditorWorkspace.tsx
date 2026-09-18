@@ -29,6 +29,7 @@ import { EditorToolbar } from "@/components/editor/EditorToolbar";
 import { FloatingFormatBubble } from "@/components/editor/FloatingFormatBubble";
 import { ResultView } from "@/components/editor/ResultView";
 import { RichContentEditor, type FormatState, type RichContentEditorHandle } from "@/components/editor/RichContentEditor";
+import type { GraphDefinition } from "@/lib/graph/types";
 import { Button, Card, Input, Spinner, Textarea } from "@/components/ui/primitives";
 import {
   createPageCoordinateSystem,
@@ -143,6 +144,42 @@ export function EditorWorkspace({ project }: { project: Project }) {
       mode: "insert",
       initialLatex: "",
       targetElement: null,
+    });
+  }, []);
+
+  const [graphModalState, setGraphModalState] = useState<{
+    isOpen: boolean;
+    mode: "insert" | "edit";
+    initialDefinition?: GraphDefinition;
+    targetBlockId?: string | null;
+  }>({
+    isOpen: false,
+    mode: "insert",
+    targetBlockId: null,
+  });
+
+  const handleOpenInsertGraph = useCallback(() => {
+    setGraphModalState({
+      isOpen: true,
+      mode: "insert",
+      targetBlockId: null,
+    });
+  }, []);
+
+  const handleOpenEditGraph = useCallback((definition: GraphDefinition, blockId: string) => {
+    setGraphModalState({
+      isOpen: true,
+      mode: "edit",
+      initialDefinition: definition,
+      targetBlockId: blockId,
+    });
+  }, []);
+
+  const handleCloseGraphModal = useCallback(() => {
+    setGraphModalState({
+      isOpen: false,
+      mode: "insert",
+      targetBlockId: null,
     });
   }, []);
 
@@ -570,6 +607,12 @@ export function EditorWorkspace({ project }: { project: Project }) {
               mathTargetElement={mathModalState.targetElement}
               onOpenInsertMath={handleOpenInsertMath}
               onCloseMathModal={handleCloseMathModal}
+              graphModalOpen={graphModalState.isOpen}
+              graphModalMode={graphModalState.mode}
+              graphInitialDefinition={graphModalState.initialDefinition}
+              graphTargetBlockId={graphModalState.targetBlockId}
+              onOpenInsertGraph={handleOpenInsertGraph}
+              onCloseGraphModal={handleCloseGraphModal}
             />
           </div>
 
@@ -580,6 +623,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
               onChange={(html) => commit((p) => ({ ...p, content: html }))}
               onFormatChange={setFormatState}
               onMathBlockClick={handleOpenEditMath}
+              onGraphBlockClick={handleOpenEditGraph}
               placeholder="Write or paste your answer here..."
               className="flex-1 min-h-0 h-full overflow-y-auto"
             />

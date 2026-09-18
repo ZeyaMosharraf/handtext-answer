@@ -72,7 +72,10 @@ export function blocksToHtml(blocks: DocumentBlock[]): string {
   for (const block of blocks) {
     switch (block.type) {
       case "text": {
-        const content = block.html?.trim() ? block.html : "<p><br></p>";
+        let content = block.html?.trim() ? block.html : "<p><br></p>";
+        while (/^<div[^>]*data-block-type=["']text["'][^>]*>([\s\S]*)<\/div>$/i.test(content.trim())) {
+          content = content.trim().replace(/^<div[^>]*data-block-type=["']text["'][^>]*>/i, "").replace(/<\/div>$/i, "");
+        }
         parts.push(
           `<div data-block-id="${escapeAttr(block.id)}" data-block-type="text">${content}</div>`
         );
@@ -104,7 +107,7 @@ export function blocksToHtml(blocks: DocumentBlock[]): string {
         const titleOrType = block.graphDef.title || block.graphDef.type || "Graph";
 
         parts.push(
-          `<div data-block-id="${escapeAttr(block.id)}" data-block-type="graph" data-graph-definition="${escapeAttr(defJson)}" class="graph-block" contenteditable="false"><div class="graph-placeholder" style="width: 100%; height: 180px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; font-family: monospace; color: #666;">[Graph: ${escapeHtml(titleOrType)}]</div></div>`
+          `<div data-block-id="${escapeAttr(block.id)}" data-block-type="graph" data-graph-definition="${escapeAttr(defJson)}" class="graph-block" contenteditable="false"><span class="graph-placeholder" style="width: 100%; height: 180px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; font-family: monospace; color: #666;">[Graph: ${escapeHtml(titleOrType)}]</span></div>`
         );
         break;
       }
@@ -132,7 +135,107 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
 
   const trimmed = rawHtml.trim();
 
-  // Fast path: Check if document consists strictly of top-level data-block-type containers
+  // 1. DOMParser Path: In browser and DOM environments, parse safely with true DOM traversal
+  if (typeof DOMParser !== "undefined") {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(trimmed, "text/html");
+      const children = Array.from(doc.body.children);
+
+      const hasBlockMarkers = children.some(
+        (el) =>
+          el.hasAttribute("data-block-type") ||
+          el.classList.contains("math-block") ||
+          el.classList.contains("graph-block") ||
+          el.tagName === "TABLE"
+      );
+
+      if (hasBlockMarkers && children.length > 0) {
+        const blocks: DocumentBlock[] = [];
+
+        for (const el of children) {
+          const typeAttr = el.getAttribute("data-block-type");
+          const blockId =
+            el.getAttribute("data-block-id") ||
+            generateBlockId(typeAttr ? typeAttr.slice(0, 3) : "blk");
+
+          if (
+            typeAttr === "math" ||
+            el.classList.contains("math-block") ||
+            el.hasAttribute("data-latex")
+          ) {
+            const latex = el.getAttribute("data-latex") || el.textContent?.trim() || "";
+            const naturalExpr = el.getAttribute("data-natural-expr") || latex;
+            const displayMode = (el.getAttribute("data-display-mode") as "block" | "compact") || "block";
+
+            blocks.push({
+              id: blockId,
+              type: "math",
+              naturalExpr,
+              latex,
+              displayMode: displayMode === "compact" ? "compact" : "block",
+              createdAt: Date.now(),
+            });
+          } else if (
+            typeAttr === "graph" ||
+            el.classList.contains("graph-block") ||
+            el.hasAttribute("data-graph-definition")
+          ) {
+            const defAttr = el.getAttribute("data-graph-definition");
+            let graphDef: GraphDefinition;
+            if (defAttr) {
+              try {
+                graphDef = JSON.parse(defAttr);
+              } catch {
+                graphDef = createDefaultGraphDef(blockId);
+              }
+            } else {
+              graphDef = createDefaultGraphDef(blockId);
+            }
+
+            blocks.push({
+              id: blockId,
+              type: "graph",
+              graphDef,
+              createdAt: Date.now(),
+            });
+          } else if (
+            typeAttr === "table" ||
+            el.tagName === "TABLE" ||
+            el.querySelector("table")
+          ) {
+            const tableEl = el.tagName === "TABLE" ? el : el.querySelector("table");
+            blocks.push({
+              id: blockId,
+              type: "table",
+              html: tableEl ? tableEl.outerHTML : el.innerHTML,
+              createdAt: Date.now(),
+            });
+          } else {
+            // Text Block: Preserve inner HTML for data-block-type="text", or outerHTML for standard elements
+            let inner = el.hasAttribute("data-block-type") ? el.innerHTML : el.outerHTML;
+            while (/^<div[^>]*data-block-type=["']text["'][^>]*>([\s\S]*)<\/div>$/i.test(inner.trim())) {
+              inner = inner.trim().replace(/^<div[^>]*data-block-type=["']text["'][^>]*>/i, "").replace(/<\/div>$/i, "");
+            }
+            blocks.push({
+              id: blockId,
+              type: "text",
+              html: inner,
+              createdAt: Date.now(),
+            });
+          }
+        }
+
+        if (blocks.length > 0) {
+          return blocks;
+        }
+      }
+    } catch {
+      // Fallback to regex parser on any DOMParser exception
+    }
+  }
+
+  // 2. Fast Regex Path for non-DOM environments
   const modernBlockRegex =
     /<div[^>]*data-block-id=["']([^"']*)["'][^>]*data-block-type=["'](text|math|table|graph)["'][^>]*>([\s\S]*?)<\/div>|<div[^>]*data-block-type=["'](text|math|table|graph)["'][^>]*data-block-id=["']([^"']*)["'][^>]*>([\s\S]*?)<\/div>/gi;
 
@@ -142,7 +245,6 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
   let match: RegExpExecArray | null;
 
   while ((match = modernBlockRegex.exec(trimmed)) !== null) {
-    // Check if there was significant content preceding this modern block
     const precedingContent = trimmed.slice(lastIndex, match.index).trim();
     if (precedingContent && precedingContent.replace(/<[^>]+>/g, "").trim()) {
       hasNonModernContent = true;
@@ -185,7 +287,6 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
         createdAt: Date.now(),
       });
     } else if (blockType === "table") {
-      // Find the inner <table> or treat innerHtml as table
       const tableMatch = innerHtml.match(/<table[\s\S]*?<\/table>/i);
       const tableHtml = tableMatch ? tableMatch[0] : innerHtml;
 
@@ -218,7 +319,6 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
     }
   }
 
-  // Check if all content was matched cleanly by modern blocks
   const trailingContent = trimmed.slice(lastIndex).trim();
   if (
     !hasNonModernContent &&
@@ -390,8 +490,8 @@ function buildTextBlockFromHtmlChunk(chunkHtml: string): TextBlock {
 
   // Clean wrapper divs if present
   let cleanHtml = chunkHtml;
-  if (/^<div[^>]*data-block-type=["']text["'][^>]*>[\s\S]*<\/div>$/i.test(chunkHtml)) {
-    cleanHtml = chunkHtml.replace(/^<div[^>]*>|<\/div>$/gi, "").trim();
+  while (/^<div[^>]*data-block-type=["']text["'][^>]*>([\s\S]*)<\/div>$/i.test(cleanHtml.trim())) {
+    cleanHtml = cleanHtml.trim().replace(/^<div[^>]*data-block-type=["']text["'][^>]*>/i, "").replace(/<\/div>$/i, "");
   }
 
   return {
