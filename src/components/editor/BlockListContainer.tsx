@@ -19,6 +19,7 @@ import { TableBlockView } from "./TableBlockView";
 import { GraphBlockView } from "./GraphBlockView";
 import type { TableSelectionInfo } from "@/lib/table-dom";
 import { cn } from "@/lib/utils";
+import { deserializeMathBlockFromClipboard, createPastedMathBlock } from "@/lib/editor/mathClipboard";
 
 export interface BlockListContainerProps {
   blocks: DocumentBlock[];
@@ -146,9 +147,23 @@ export const BlockListContainer: React.FC<BlockListContainerProps> = ({
     [blocks, onInsertBlockAfter]
   );
 
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLDivElement>) => {
+      const payload = deserializeMathBlockFromClipboard(e.clipboardData);
+      if (payload) {
+        e.preventDefault();
+        const newBlock = createPastedMathBlock(payload);
+        const targetAfterId = selectedBlockId || (blocks.length > 0 ? blocks[blocks.length - 1]!.id : null);
+        onInsertBlockAfter(newBlock, targetAfterId);
+      }
+    },
+    [blocks, selectedBlockId, onInsertBlockAfter]
+  );
+
   return (
     <div
       onClick={handleContainerClick}
+      onPaste={handlePaste}
       className={cn("block-list-container flex flex-col min-h-full cursor-text pb-16", className)}
     >
       {blocks.map((block) => {

@@ -19,16 +19,22 @@ import {
 } from "../../types/document";
 
 /**
- * Inserts a block immediately after `afterId`, or at the end of the array if `afterId` is omitted.
+ * Inserts a block immediately after `afterId`, or before `beforeId`, or at the end of the array if neither is specified.
  */
 export function insertBlockOp(
   blocks: DocumentBlock[],
   newBlock: DocumentBlock,
-  afterId?: string | null
+  afterId?: string | null,
+  beforeId?: string | null
 ): DocumentBlock[] {
   let insertIndex = blocks.length;
 
-  if (afterId) {
+  if (beforeId) {
+    const foundIdx = blocks.findIndex((b) => b.id === beforeId);
+    if (foundIdx !== -1) {
+      insertIndex = foundIdx;
+    }
+  } else if (afterId) {
     const foundIdx = blocks.findIndex((b) => b.id === afterId);
     if (foundIdx !== -1) {
       insertIndex = foundIdx + 1;

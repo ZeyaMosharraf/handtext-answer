@@ -31,6 +31,12 @@ import {
 import type { GraphDefinition } from "@/lib/graph/types";
 import { renderDigitalMathToHtml } from "@/lib/math/digitalRenderer";
 import { cn } from "@/lib/utils";
+import { generateBlockId } from "@/types/document";
+import {
+  serializeMathBlockToClipboard,
+  deserializeMathBlockFromClipboard,
+  type MathClipboardPayload,
+} from "@/lib/editor/mathClipboard";
 
 export interface FormatState {
   bold: boolean;
@@ -110,7 +116,7 @@ function sanitizeForEditor(rawHtml: string): string {
 
 function formatMathBlockInner(latex: string): string {
   const digitalHtml = renderDigitalMathToHtml(latex);
-  return `<span class="math-digital-content" style="display:inline-flex;align-items:center;vertical-align:middle;">${digitalHtml}</span><span class="math-chip-actions" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;opacity:0.65;font-size:11px;font-family:sans-serif;"><span class="math-chip-edit" style="cursor:pointer;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,0.06);font-weight:500;">Edit</span></span>`;
+  return `<span class="math-digital-content" style="display:inline-flex;align-items:center;vertical-align:middle;">${digitalHtml}</span><span class="math-chip-actions" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;opacity:0.65;font-size:11px;font-family:sans-serif;"><span class="math-chip-copy" title="Copy formula (Ctrl+C)" style="cursor:pointer;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,0.06);font-weight:500;">Copy</span><span class="math-chip-edit" title="Edit formula" style="cursor:pointer;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,0.06);font-weight:500;">Edit</span></span>`;
 }
 
 function formatGraphBlockInner(definition: GraphDefinition): string {
@@ -564,6 +570,251 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
     );
 
     const currentMathElementRef = useRef<HTMLElement | null>(null);
+    const selectedMathElementRef = useRef<HTMLElement | null>(null);
+
+    const selectMathElement = useCallback(
+      (mathBlock: HTMLElement | null) => {
+        const el = editorRef.current;
+        if (!el) return;
+        const allMathBlocks = el.querySelectorAll<HTMLElement>(".math-block");
+        allMathBlocks.forEach((m) => {
+          m.classList.remove("math-block-selected");
+          m.style.borderColor = "rgba(99,102,241,0.25)";
+          m.style.boxShadow = "none";
+          m.style.background = "rgba(99,102,241,0.08)";
+        });
+
+        selectedMathElementRef.current = mathBlock;
+        currentMathElementRef.current = mathBlock;
+
+        if (mathBlock) {
+          mathBlock.classList.add("math-block-selected");
+          mathBlock.style.borderColor = "#4f46e5";
+          mathBlock.style.boxShadow = "0 0 0 2px rgba(99, 102, 241, 0.4)";
+          mathBlock.style.background = "rgba(99,102,241,0.14)";
+          mathBlock.focus();
+
+          const latex = mathBlock.getAttribute("data-latex") ?? "";
+          const baseState = queryActiveFormats();
+          const updated = {
+            ...baseState,
+            mathInfo: { latex, element: mathBlock },
+          };
+          setFormatState(updated);
+          onFormatChange?.(updated);
+        }
+      },
+      [queryActiveFormats, onFormatChange],
+    );
+
+    const copyMathBlockFromElement = useCallback(
+      (mathBlock: HTMLElement, clipboardData?: DataTransfer | null) => {
+        const latex = mathBlock.getAttribute("data-latex") ?? "";
+        const naturalExpr = mathBlock.getAttribute("data-natural-expr") || latex;
+        const blockId = mathBlock.getAttribute("data-block-id") || undefined;
+        const displayMode =
+          (mathBlock.getAttribute("data-display-mode") as "block" | "compact") || "block";
+
+        serializeMathBlockToClipboard(
+          {
+            id: blockId,
+            latex,
+            naturalExpr,
+            displayMode,
+          },
+          clipboardData,
+        );
+
+        if (!clipboardData && typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(naturalExpr || latex).catch(() => {});
+        }
+
+        const copyBtn = mathBlock.querySelector<HTMLElement>(".math-chip-copy");
+        if (copyBtn) {
+          const orig = copyBtn.textContent;
+          copyBtn.textContent = "Copied!";
+          copyBtn.style.color = "#4f46e5";
+          copyBtn.style.fontWeight = "600";
+          setTimeout(() => {
+            if (copyBtn) {
+              copyBtn.textContent = orig || "Copy";
+              copyBtn.style.color = "";
+              copyBtn.style.fontWeight = "";
+            }
+          }, 1200);
+        }
+      },
+      [],
+    );
+
+    const pasteMathBlock = useCallback(
+      (payload: MathClipboardPayload) => {
+        const el = editorRef.current;
+        if (!el) return;
+        el.focus();
+
+        const newId = generateBlockId("math");
+        const trimmed = payload.latex.trim();
+        const naturalExpr = (payload.naturalExpr || payload.latex).trim();
+        const displayMode = payload.displayMode || "block";
+
+        const mathDiv = document.createElement("div");
+        mathDiv.className = "math-block";
+        mathDiv.setAttribute("data-block-id", newId);
+        mathDiv.setAttribute("data-block-type", "math");
+        mathDiv.setAttribute("data-latex", trimmed);
+        mathDiv.setAttribute("data-natural-expr", naturalExpr);
+        mathDiv.setAttribute("data-display-mode", displayMode);
+        mathDiv.setAttribute("contenteditable", "false");
+        mathDiv.setAttribute("tabindex", "0");
+        mathDiv.style.cssText =
+          "display:inline-flex;align-items:center;gap:6px;padding:3px 10px;" +
+          "margin:4px 0;border-radius:6px;background:rgba(99,102,241,0.08);" +
+          "border:1px solid rgba(99,102,241,0.25);cursor:pointer;user-select:none;" +
+          "font-size:1em;color:#1e1b4b;vertical-align:middle;";
+        mathDiv.innerHTML = formatMathBlockInner(trimmed);
+
+        const createTrailingParagraph = () => {
+          const p = document.createElement("p");
+          p.innerHTML = "<br>";
+          return p;
+        };
+
+        const setCaretInParagraph = (p: HTMLElement) => {
+          const sel = window.getSelection();
+          if (sel) {
+            const range = document.createRange();
+            range.setStart(p, 0);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            savedRangeRef.current = range.cloneRange();
+          }
+        };
+
+        let inserted = false;
+
+        // 1. If a math block was explicitly selected by the user, paste directly after it
+        if (selectedMathElementRef.current && el.contains(selectedMathElementRef.current)) {
+          const target = selectedMathElementRef.current;
+          const trailingP = createTrailingParagraph();
+          if (target.nextSibling) {
+            target.parentNode?.insertBefore(mathDiv, target.nextSibling);
+            target.parentNode?.insertBefore(trailingP, mathDiv.nextSibling);
+          } else {
+            target.parentNode?.appendChild(mathDiv);
+            target.parentNode?.appendChild(trailingP);
+          }
+          setCaretInParagraph(trailingP);
+          selectMathElement(mathDiv);
+          inserted = true;
+        }
+
+        // 2. Otherwise inspect caret position from current or saved selection
+        if (!inserted) {
+          const sel = window.getSelection();
+          const activeRange =
+            (sel && sel.rangeCount > 0 && el.contains(sel.getRangeAt(0).commonAncestorContainer)
+              ? sel.getRangeAt(0)
+              : null) ??
+            (savedRangeRef.current && el.contains(savedRangeRef.current.commonAncestorContainer)
+              ? savedRangeRef.current
+              : null);
+
+          if (activeRange) {
+            try {
+              let targetNode: Node | null = activeRange.startContainer;
+              if (targetNode.nodeType === 3) targetNode = targetNode.parentNode;
+              const parentBlock = (targetNode as HTMLElement)?.closest?.("p, div, .math-block");
+
+              if (parentBlock && parentBlock.classList.contains("math-block")) {
+                const trailingP = createTrailingParagraph();
+                if (parentBlock.nextSibling) {
+                  parentBlock.parentNode?.insertBefore(mathDiv, parentBlock.nextSibling);
+                  parentBlock.parentNode?.insertBefore(trailingP, mathDiv.nextSibling);
+                } else {
+                  parentBlock.parentNode?.appendChild(mathDiv);
+                  parentBlock.parentNode?.appendChild(trailingP);
+                }
+                setCaretInParagraph(trailingP);
+                selectMathElement(mathDiv);
+                inserted = true;
+              } else if (
+                parentBlock &&
+                parentBlock !== el &&
+                (!parentBlock.textContent?.trim() || parentBlock.innerHTML === "<br>")
+              ) {
+                const trailingP = createTrailingParagraph();
+                parentBlock.replaceWith(mathDiv);
+                if (mathDiv.nextSibling) {
+                  mathDiv.parentNode?.insertBefore(trailingP, mathDiv.nextSibling);
+                } else {
+                  mathDiv.parentNode?.appendChild(trailingP);
+                }
+                setCaretInParagraph(trailingP);
+                selectMathElement(mathDiv);
+                inserted = true;
+              } else if (parentBlock && parentBlock !== el && parentBlock.parentNode === el) {
+                const trailingP = createTrailingParagraph();
+                if (activeRange.startOffset === 0 && activeRange.collapsed) {
+                  el.insertBefore(mathDiv, parentBlock);
+                  setCaretInParagraph(parentBlock as HTMLElement);
+                } else {
+                  if (parentBlock.nextSibling) {
+                    el.insertBefore(mathDiv, parentBlock.nextSibling);
+                    el.insertBefore(trailingP, mathDiv.nextSibling);
+                  } else {
+                    el.appendChild(mathDiv);
+                    el.appendChild(trailingP);
+                  }
+                  setCaretInParagraph(trailingP);
+                }
+                selectMathElement(mathDiv);
+                inserted = true;
+              } else {
+                activeRange.deleteContents();
+                activeRange.insertNode(mathDiv);
+                const trailingP = createTrailingParagraph();
+                if (mathDiv.nextSibling) {
+                  mathDiv.parentNode?.insertBefore(trailingP, mathDiv.nextSibling);
+                } else {
+                  el.appendChild(trailingP);
+                }
+                setCaretInParagraph(trailingP);
+                selectMathElement(mathDiv);
+                inserted = true;
+              }
+            } catch {
+              inserted = false;
+            }
+          }
+        }
+
+        // 3. Fallback: append inside editor
+        if (!inserted) {
+          const lastChild = el.lastElementChild;
+          const trailingP = createTrailingParagraph();
+          if (
+            lastChild &&
+            (lastChild.tagName === "P" || lastChild.tagName === "DIV") &&
+            (!lastChild.textContent?.trim() || lastChild.innerHTML === "<br>")
+          ) {
+            lastChild.replaceWith(mathDiv);
+            el.appendChild(trailingP);
+          } else {
+            el.appendChild(mathDiv);
+            el.appendChild(trailingP);
+          }
+          setCaretInParagraph(trailingP);
+          selectMathElement(mathDiv);
+          inserted = true;
+        }
+
+        triggerChange();
+        updateFormatState();
+      },
+      [triggerChange, updateFormatState, selectMathElement],
+    );
 
     const insertMathBlock = useCallback(
       (latex: string) => {
@@ -575,10 +826,16 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         if (!trimmed) return;
 
         // Build the math-block DOM node
+        const blockId = generateBlockId("math");
         const mathDiv = document.createElement("div");
         mathDiv.className = "math-block";
+        mathDiv.setAttribute("data-block-id", blockId);
+        mathDiv.setAttribute("data-block-type", "math");
         mathDiv.setAttribute("data-latex", trimmed);
+        mathDiv.setAttribute("data-natural-expr", trimmed);
+        mathDiv.setAttribute("data-display-mode", "block");
         mathDiv.setAttribute("contenteditable", "false");
+        mathDiv.setAttribute("tabindex", "0");
         mathDiv.style.cssText =
           "display:inline-flex;align-items:center;gap:6px;padding:3px 10px;" +
           "margin:4px 0;border-radius:6px;background:rgba(99,102,241,0.08);" +
@@ -944,8 +1201,11 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
     );
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const el = editorRef.current;
+      if (!el) return;
+
       if (e.key === "Tab") {
-        if (editorRef.current && handleTableTabNavigation(editorRef.current, e.shiftKey)) {
+        if (handleTableTabNavigation(el, e.shiftKey)) {
           e.preventDefault();
           triggerChange();
           return;
@@ -988,6 +1248,15 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
 
       if (e.ctrlKey || e.metaKey) {
         const key = e.key.toLowerCase();
+        if (key === "c") {
+          const sel = window.getSelection();
+          const hasTextSel = sel && !sel.isCollapsed && sel.toString().length > 0;
+          if (!hasTextSel && selectedMathElementRef.current && el.contains(selectedMathElementRef.current)) {
+            e.preventDefault();
+            copyMathBlockFromElement(selectedMathElementRef.current);
+            return;
+          }
+        }
         if (key === "b") {
           e.preventDefault();
           toggleBold();
@@ -1004,9 +1273,45 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
           return;
         }
       }
+
+      // Handle Escape, Backspace, Delete, Enter on selected MathBlock
+      if (selectedMathElementRef.current && el.contains(selectedMathElementRef.current)) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          selectMathElement(null);
+          return;
+        }
+        if (e.key === "Backspace" || e.key === "Delete") {
+          const sel = window.getSelection();
+          const hasTextSel = sel && !sel.isCollapsed && sel.toString().length > 0;
+          if (!hasTextSel) {
+            e.preventDefault();
+            const target = selectedMathElementRef.current;
+            selectMathElement(null);
+            target.remove();
+            triggerChange();
+            updateFormatState();
+            return;
+          }
+        }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const target = selectedMathElementRef.current;
+          const latex = target.getAttribute("data-latex") ?? "";
+          onMathBlockClick?.(latex, target);
+          return;
+        }
+      }
     };
 
     const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+      const mathPayload = deserializeMathBlockFromClipboard(e.clipboardData);
+      if (mathPayload) {
+        e.preventDefault();
+        pasteMathBlock(mathPayload);
+        return;
+      }
+
       const plain = e.clipboardData.getData("text/plain");
       if (
         /(\*\*[^*\n]+\*\*|__[^\n_]+__|==[^\n=]+==)/.test(plain) &&
@@ -1031,6 +1336,28 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         onInput={triggerChange}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
+        onCopy={(e) => {
+          const sel = window.getSelection();
+          const hasTextSel = sel && !sel.isCollapsed && sel.toString().length > 0;
+          if (
+            !hasTextSel &&
+            selectedMathElementRef.current &&
+            editorRef.current?.contains(selectedMathElementRef.current)
+          ) {
+            e.preventDefault();
+            copyMathBlockFromElement(selectedMathElementRef.current, e.clipboardData);
+          }
+        }}
+        onDoubleClick={(e) => {
+          const target = e.target as HTMLElement | null;
+          const mathBlock = target?.closest?.(".math-block") as HTMLElement | null;
+          if (mathBlock) {
+            e.stopPropagation();
+            const latex = mathBlock.getAttribute("data-latex") ?? "";
+            selectMathElement(mathBlock);
+            onMathBlockClick?.(latex, mathBlock);
+          }
+        }}
         onBlur={saveSelection}
         onKeyUp={() => {
           saveSelection();
@@ -1082,19 +1409,42 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
           const el = editorRef.current;
           if (!el) return;
           const target = e.target as HTMLElement | null;
+
+          // Check if copy button on math chip was clicked
+          const copyBtn = target?.closest?.(".math-chip-copy") as HTMLElement | null;
+          if (copyBtn) {
+            e.stopPropagation();
+            const mathBlock = copyBtn.closest(".math-block") as HTMLElement | null;
+            if (mathBlock) {
+              selectMathElement(mathBlock);
+              copyMathBlockFromElement(mathBlock);
+            }
+            return;
+          }
+
+          // Check if edit button on math chip was clicked
+          const editBtn = target?.closest?.(".math-chip-edit") as HTMLElement | null;
+          if (editBtn) {
+            e.stopPropagation();
+            const mathBlock = editBtn.closest(".math-block") as HTMLElement | null;
+            if (mathBlock) {
+              const latex = mathBlock.getAttribute("data-latex") ?? "";
+              selectMathElement(mathBlock);
+              onMathBlockClick?.(latex, mathBlock);
+            }
+            return;
+          }
+
+          // Check if math block itself was clicked (selects it)
           const mathBlock = target?.closest?.(".math-block") as HTMLElement | null;
           if (mathBlock) {
-            const latex = mathBlock.getAttribute("data-latex") ?? "";
-            currentMathElementRef.current = mathBlock;
-            const baseState = queryActiveFormats();
-            const updated = {
-              ...baseState,
-              mathInfo: { latex, element: mathBlock },
-            };
-            setFormatState(updated);
-            onFormatChange?.(updated);
-            onMathBlockClick?.(latex, mathBlock);
+            selectMathElement(mathBlock);
             return;
+          }
+
+          // Clicked outside math block -> deselect
+          if (selectedMathElementRef.current) {
+            selectMathElement(null);
           }
 
           const graphBlock = target?.closest?.(".graph-block") as HTMLElement | null;

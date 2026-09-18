@@ -35,11 +35,12 @@
 import React, { useCallback, useMemo, useState, useEffect } from "react";
 import type { MathBlock } from "@/types/document";
 import { cn } from "@/lib/utils";
-import { Edit2, Trash2, AlertCircle } from "lucide-react";
+import { Edit2, Trash2, AlertCircle, Copy } from "lucide-react";
 import { Button } from "@/components/ui/primitives";
 import { parseMath } from "@/lib/math";
 import { DigitalMath } from "@/lib/math/digitalRenderer";
 import type { MathNode } from "@/lib/math";
+import { serializeMathBlockToClipboard } from "@/lib/editor/mathClipboard";
 
 export interface MathBlockViewProps {
   block: MathBlock;
@@ -81,11 +82,28 @@ export const MathBlockView: React.FC<MathBlockViewProps> = React.memo(
       setEscDeselect(false);
     }, [isSelected, escDeselect]);
 
+    const [copied, setCopied] = useState(false);
+    const handleCopy = useCallback(
+      (e?: React.SyntheticEvent) => {
+        e?.stopPropagation();
+        serializeMathBlockToClipboard(block);
+        if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(block.naturalExpr || block.latex).catch(() => {});
+        }
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      [block]
+    );
+
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLDivElement>) => {
         if (!isSelected) return;
 
-        if (e.key === "Enter") {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+          e.preventDefault();
+          handleCopy();
+        } else if (e.key === "Enter") {
           e.preventDefault();
           onEdit?.();
         } else if (e.key === "Backspace" || e.key === "Delete") {
@@ -97,7 +115,7 @@ export const MathBlockView: React.FC<MathBlockViewProps> = React.memo(
           (e.currentTarget as HTMLElement).blur();
         }
       },
-      [isSelected, onEdit, onDelete]
+      [isSelected, handleCopy, onEdit, onDelete]
     );
 
     return (
@@ -167,6 +185,17 @@ export const MathBlockView: React.FC<MathBlockViewProps> = React.memo(
             isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-80"
           )}
         >
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={handleCopy}
+            title="Copy formula (Ctrl+C)"
+            className="h-6 gap-1 px-1.5 text-muted-foreground hover:bg-primary/10 hover:text-primary cursor-pointer"
+          >
+            <Copy className="size-3" />
+            <span className="text-[11px]">{copied ? "Copied" : "Copy"}</span>
+          </Button>
           <Button
             type="button"
             size="sm"

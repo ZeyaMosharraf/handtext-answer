@@ -211,7 +211,9 @@ function layoutIdentifier(
   // Math identifiers are italic by convention
   const italic = /^[a-zA-Z]$/.test(node.value);
   setFont(ctx, settings, size, italic);
-  const w = measureGlyphWidth(ctx, settings, node.value, size, italic);
+  // Italic correction (TeX \itcorr) to prevent slant overhang from colliding with following delimiters/symbols
+  const italicKern = italic ? size * 0.22 : size * 0.06;
+  const w = measureGlyphWidth(ctx, settings, node.value, size, italic) + italicKern;
   const ascent = size * 0.72;
   const descent = italic ? size * 0.14 : size * 0.18;
   const text = node.value;
@@ -233,9 +235,11 @@ function layoutOperator(
   scale: number,
 ): MathLayoutBox {
   const size = baseSize * scale;
-  const spacing = baseSize * scale * OP_SPACING_EM;
+  const isPunctuation = node.value === "," || node.value === ";" || node.value === ":";
+  const leftSpacing = isPunctuation ? 0 : baseSize * scale * OP_SPACING_EM;
+  const rightSpacing = isPunctuation ? baseSize * scale * 0.15 : baseSize * scale * OP_SPACING_EM;
   const glyphW = measureTextWidth(ctx, settings, node.value, size);
-  const w = glyphW + spacing * 2;
+  const w = glyphW + leftSpacing + rightSpacing;
   const ascent = size * 0.72;
   const descent = size * 0.18;
   const text = node.value;
@@ -243,7 +247,7 @@ function layoutOperator(
   return makeBox("operator", w, ascent, descent, (ctx, x, y, settings, random, ink) => {
     const seg = { text, bold: false, underline: false, italic: false };
     const pen: PenOptions = { size, color: ink, scale: 1 };
-    writeSegments(ctx, [seg], settings, x + spacing, y, random, pen);
+    writeSegments(ctx, [seg], settings, x + leftSpacing, y, random, pen);
   });
 }
 
@@ -549,8 +553,10 @@ function layoutGrouped(
 ): MathLayoutBox {
   const bodyBox = layoutSequence(node.body, ctx, settings, baseSize, scale);
   const size = baseSize * scale;
-  const delimW = node.open ? size * 0.22 : 0;
-  const totalW = bodyBox.width + delimW * 2;
+  const delimW = size * 0.38;
+  const openW = node.open ? delimW : 0;
+  const closeW = node.close ? delimW : 0;
+  const totalW = bodyBox.width + openW + closeW;
 
   // Symmetrically balance delimiters around the math axis (-0.28 * size above baseline)
   const axisY = -(size * 0.28);
@@ -577,17 +583,11 @@ function layoutGrouped(
       if (open) {
         drawDelimiter(ctx, x, y, totalAscent, totalDescent, open, size, settings, random, ink, sw);
       }
-      bodyBox.draw(ctx, x + delimW, y, settings, random, ink);
-      if (close && close !== open) {
+      bodyBox.draw(ctx, x + openW, y, settings, random, ink);
+      if (close) {
         drawDelimiter(
-          ctx, x + delimW + bodyBox.width, y, totalAscent, totalDescent,
+          ctx, x + openW + bodyBox.width, y, totalAscent, totalDescent,
           close, size, settings, random, ink, sw,
-        );
-      } else if (close === open && open === "|") {
-        // Second pipe
-        drawDelimiter(
-          ctx, x + delimW + bodyBox.width, y, totalAscent, totalDescent,
-          close!, size, settings, random, ink, sw,
         );
       }
     },
@@ -613,7 +613,7 @@ function drawDelimiter(
   const y1 = top + h * 0.28;
   const y2 = bottom - h * 0.28;
   const mid = (top + bottom) / 2;
-  const cx = x + size * 0.11;
+  const cx = x + size * 0.19;
   const bowW = Math.max(size * 0.12, Math.min(size * 0.20, h * 0.16));
 
   ctx.save();
@@ -641,10 +641,10 @@ function drawDelimiter(
       ctx.lineTo(cx - bowW * 0.3 + j(), bottom + j());
       ctx.lineTo(cx + bowW * 0.3 + j(), bottom + j());
     } else {
-      // Curly {
-      ctx.moveTo(cx + bowW * 0.4, top + j());
-      ctx.bezierCurveTo(cx - bowW * 0.2, top + j(), cx - bowW * 0.8, mid - size * 0.1, cx - bowW * 0.85, mid + j());
-      ctx.bezierCurveTo(cx - bowW * 0.8, mid + size * 0.1, cx - bowW * 0.2, bottom + j(), cx + bowW * 0.4, bottom + j());
+      // Curly { with sharp central cusp pointing left
+      ctx.moveTo(cx + bowW * 0.35 + j(), top + j());
+      ctx.bezierCurveTo(cx - bowW * 0.15, top + j(), cx - bowW * 0.25, mid - size * 0.12, cx - bowW * 0.85 + j(), mid + j());
+      ctx.bezierCurveTo(cx - bowW * 0.25, mid + size * 0.12, cx - bowW * 0.15, bottom + j(), cx + bowW * 0.35 + j(), bottom + j());
     }
   } else if (delim === ")" || delim === "]" || delim === "}") {
     if (delim === ")") {
@@ -660,10 +660,10 @@ function drawDelimiter(
       ctx.lineTo(cx + bowW * 0.3 + j(), bottom + j());
       ctx.lineTo(cx - bowW * 0.3 + j(), bottom + j());
     } else {
-      // Curly }
-      ctx.moveTo(cx - bowW * 0.4, top + j());
-      ctx.bezierCurveTo(cx + bowW * 0.2, top + j(), cx + bowW * 0.8, mid - size * 0.1, cx + bowW * 0.85, mid + j());
-      ctx.bezierCurveTo(cx + bowW * 0.8, mid + size * 0.1, cx + bowW * 0.2, bottom + j(), cx - bowW * 0.4, bottom + j());
+      // Curly } with sharp central cusp pointing right
+      ctx.moveTo(cx - bowW * 0.35 + j(), top + j());
+      ctx.bezierCurveTo(cx + bowW * 0.15, top + j(), cx + bowW * 0.25, mid - size * 0.12, cx + bowW * 0.85 + j(), mid + j());
+      ctx.bezierCurveTo(cx + bowW * 0.25, mid + size * 0.12, cx + bowW * 0.15, bottom + j(), cx - bowW * 0.35 + j(), bottom + j());
     }
   } else if (delim === "|") {
     ctx.moveTo(cx + j(), top + j());

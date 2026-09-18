@@ -102,11 +102,15 @@ class Parser {
 
   /** Parse a brace group { ... } → MathNode[] */
   private parseBraceGroup(): MathNode[] {
+    return this.parseBraceGroupWithStatus().body;
+  }
+
+  private parseBraceGroupWithStatus(): { body: MathNode[]; closed: boolean } {
     const t = this.peek();
     if (t.kind !== "LBRACE") {
       // Single token shortcut: \frac12 means \frac{1}{2}
       const node = this.parseSingleToken();
-      return node ? [node] : [];
+      return { body: node ? [node] : [], closed: false };
     }
     this.consume(); // {
     const nodes: MathNode[] = [];
@@ -114,8 +118,9 @@ class Parser {
       const node = this.parseNode();
       if (node) nodes.push(node);
     }
-    if (this.peek().kind === "RBRACE") this.consume(); // }
-    return nodes;
+    const closed = this.peek().kind === "RBRACE";
+    if (closed) this.consume(); // }
+    return { body: nodes, closed };
   }
 
   /** Parse a bracket group [ ... ] → MathNode[] (for optional sqrt index) */
@@ -164,6 +169,12 @@ class Parser {
   private parseNode(): MathNode | null {
     const t = this.peek();
 
+    // Spaces: user typed space or ~
+    if (t.kind === "SPACE") {
+      this.consume();
+      return { type: "space", widthEm: 0.38 } as SpaceNode;
+    }
+
     // Numbers
     if (t.kind === "NUMBER") {
       this.consume();
@@ -208,8 +219,8 @@ class Parser {
 
     // Brace group { ... } at top level
     if (t.kind === "LBRACE") {
-      const nodes = this.parseBraceGroup();
-      return this.maybeSupSub([{ type: "grouped", open: "", close: "", body: nodes } as GroupedNode]);
+      const { body, closed } = this.parseBraceGroupWithStatus();
+      return this.maybeSupSub([{ type: "grouped", open: "{", close: closed ? "}" : "", body } as GroupedNode]);
     }
 
     // LaTeX command

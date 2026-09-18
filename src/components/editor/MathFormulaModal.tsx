@@ -144,7 +144,7 @@ export function MathFormulaModal({
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-      if (!trimmed) {
+      if (!latex.trim()) {
         ctx.fillStyle = "#9ca3af";
         ctx.font = "13px ui-sans-serif, system-ui, sans-serif";
         ctx.textAlign = "center";
@@ -162,7 +162,7 @@ export function MathFormulaModal({
           lineSpacing: 1.4,
         };
 
-        const ast = parseMath(trimmed);
+        const ast = parseMath(latex.trimStart());
         const box = layoutMath(ast, ctx, settings, 1.0);
 
         // Draw light ruled background line to indicate math baseline alignment
