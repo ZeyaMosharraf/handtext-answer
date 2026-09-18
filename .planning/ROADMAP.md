@@ -20,31 +20,44 @@
 
 ### Phase M2-P1 — Handwritten Graph Support
 
-**Status:** 🔬 Research & Architecture (this planning cycle)
+**Status:** ✅ Shipped (Commit `1581af1`, 262 unit & integration tests passing)
 
 **Goal:** Allow students to insert academic/scientific graphs (coordinate axes, function plots,
-point data, scatter plots) that render as genuinely handwritten content on the A4 page — not as
-digital charts, screenshots, or SVG overlays.
+point data, scatter plots) that render as genuinely handwritten content on the A4 page.
 
-**Key constraints:**
-- New isolated subsystem: `src/lib/graph/`
-- Graph pipeline is separate from Math — no cross-contamination of internals
-- Reuses `pen.ts` stroke primitives for handwritten appearance
-- Graph blocks participate in existing pagination as atomic `lineUnits`
-- Graph definitions stored in DOM as structured attributes (not canvas screenshots)
-
-**Planning artifacts:**
-- [CONTEXT.md](phases/graph-support/CONTEXT.md)
+**Artifacts:**
 - [RESEARCH.md](phases/graph-support/RESEARCH.md)
 - [ARCHITECTURE.md](phases/graph-support/ARCHITECTURE.md)
-- [PLAN.md](phases/graph-support/PLAN.md) *(to be created during plan-phase)*
+- [PLAN.md](phases/graph-support/PLAN.md)
 - [UAT.md](phases/graph-support/UAT.md)
 
 ---
 
-### Phase M2-P2 — Question Panel (Synchronized Workspace)
+### Phase M2-P2 — Math & Document Editing UX Redesign
 
-**Status:** ⏸️ Explicitly deferred — do NOT begin until M2-P1 ships.
+**Status:** 🔬 Active Planning (Research & Architecture Complete, Plan Ready for Review)
+
+**Goal:** Transform HandText's editing experience into a robust **Hybrid Block-Document Model**
+with discrete object interaction for math, tables, and graphs, seamless text continuity, natural
+calculator-style math input without raw LaTeX/`\quad`, and precise notebook ruled-line baseline alignment.
+
+**Key constraints:**
+- NO application code changes in this phase.
+- Final output remains authentic A4 ruled-page canvas renderer with strict pagination.
+- Existing tables and graphs preserved 100%.
+- Zero-loss backward compatibility with existing drafts and Supabase projects.
+
+**Planning artifacts:**
+- [RESEARCH.md](phases/math-document-editor/RESEARCH.md)
+- [ARCHITECTURE.md](phases/math-document-editor/ARCHITECTURE.md)
+- [CONTEXT.md](phases/math-document-editor/CONTEXT.md)
+- [PLAN.md](phases/math-document-editor/PLAN.md)
+
+---
+
+### Phase M2-P3 — Question Panel (Synchronized Workspace)
+
+**Status:** ⏸️ Explicitly deferred — do NOT begin until M2-P2 ships.
 
 **Goal:** Left-right synchronized workspace where question is shown on the left and student answer
 is rendered on the right. Complex interaction model requiring careful layout engine changes.
