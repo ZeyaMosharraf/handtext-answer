@@ -8,6 +8,8 @@
 export { parseMath } from "./parser";
 export { layoutMath, computeLineUnits } from "./layout";
 export { hasGlyph, drawGlyph, GLYPH_MAP } from "./glyphs";
+export { DigitalMath } from "./digitalRenderer";
+export type { DigitalMathProps } from "./digitalRenderer";
 export type {
   MathNode,
   NumberNode,
