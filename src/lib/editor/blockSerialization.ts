@@ -87,9 +87,10 @@ export function blocksToHtml(blocks: DocumentBlock[]): string {
         const latex = block.latex || block.naturalExpr || "";
         const displayMode = block.displayMode || "block";
         const innerContent = escapeHtml(naturalExpr);
+        const colorAttr = block.color ? ` data-color="${escapeAttr(block.color)}"` : "";
 
         parts.push(
-          `<div data-block-id="${escapeAttr(block.id)}" data-block-type="math" data-natural-expr="${escapeAttr(naturalExpr)}" data-latex="${escapeAttr(latex)}" data-display-mode="${escapeAttr(displayMode)}" class="math-block" contenteditable="false">${innerContent}</div>`
+          `<div data-block-id="${escapeAttr(block.id)}" data-block-type="math" data-natural-expr="${escapeAttr(naturalExpr)}" data-latex="${escapeAttr(latex)}" data-display-mode="${escapeAttr(displayMode)}"${colorAttr} class="math-block" contenteditable="false">${innerContent}</div>`
         );
         break;
       }
@@ -167,6 +168,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
             const latex = el.getAttribute("data-latex") || el.textContent?.trim() || "";
             const naturalExpr = el.getAttribute("data-natural-expr") || latex;
             const displayMode = (el.getAttribute("data-display-mode") as "block" | "compact") || "block";
+            const color = el.getAttribute("data-color") || undefined;
 
             blocks.push({
               id: blockId,
@@ -174,6 +176,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
               naturalExpr,
               latex,
               displayMode: displayMode === "compact" ? "compact" : "block",
+              ...(color ? { color } : {}),
               createdAt: Date.now(),
             });
           } else if (
@@ -269,6 +272,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
       const latexMatch = fullMatchedDiv.match(/data-latex=["']([^"']*)["']/i);
       const naturalMatch = fullMatchedDiv.match(/data-natural-expr=["']([^"']*)["']/i);
       const displayMatch = fullMatchedDiv.match(/data-display-mode=["']([^"']*)["']/i);
+      const colorMatch = fullMatchedDiv.match(/data-color=["']([^"']*)["']/i);
 
       const latex = latexMatch ? unescapeAttr(latexMatch[1] ?? "") : innerHtml.trim();
       const naturalExpr = naturalMatch
@@ -277,6 +281,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
       const displayMode = (displayMatch ? displayMatch[1] : "block") as
         | "block"
         | "compact";
+      const color = colorMatch ? unescapeAttr(colorMatch[1] ?? "") : undefined;
 
       modernBlocks.push({
         id: blockId,
@@ -284,6 +289,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
         naturalExpr,
         latex,
         displayMode: displayMode === "compact" ? "compact" : "block",
+        ...(color ? { color } : {}),
         createdAt: Date.now(),
       });
     } else if (blockType === "table") {
@@ -345,7 +351,7 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
   // Step 1: Pre-tokenize math blocks so nested divs don't break regex matching
   const mathTokenMap = new Map<
     string,
-    { id?: string | undefined; latex: string; naturalExpr: string; displayMode: "block" | "compact" }
+    { id?: string | undefined; latex: string; naturalExpr: string; displayMode: "block" | "compact"; color?: string | undefined }
   >();
   let mathCounter = 0;
 
@@ -356,12 +362,14 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
       const latexMatch = fullMatch.match(/data-latex=["']([^"']*)["']/i);
       const naturalMatch = fullMatch.match(/data-natural-expr=["']([^"']*)["']/i);
       const displayMatch = fullMatch.match(/data-display-mode=["']([^"']*)["']/i);
+      const colorMatch = fullMatch.match(/data-color=["']([^"']*)["']/i);
 
       // Extract inner text fallback if data-latex is missing
       const innerText = fullMatch.replace(/<[^>]+>/g, "").trim();
       const latex = latexMatch ? unescapeAttr(latexMatch[1] ?? "") : innerText;
       const naturalExpr = naturalMatch ? unescapeAttr(naturalMatch[1] ?? "") : latex;
       const displayMode = (displayMatch ? displayMatch[1] : "block") as "block" | "compact";
+      const color = colorMatch ? unescapeAttr(colorMatch[1] ?? "") : undefined;
 
       const token = `__HANDTEXT_MATH_BLOCK_TOKEN_${mathCounter++}__`;
       mathTokenMap.set(token, {
@@ -369,6 +377,7 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
         latex,
         naturalExpr,
         displayMode,
+        color,
       });
 
       return `\n${token}\n`;
@@ -445,6 +454,7 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
         naturalExpr: data.naturalExpr,
         latex: data.latex,
         displayMode: data.displayMode,
+        ...(data.color ? { color: data.color } : {}),
         createdAt: Date.now(),
       });
     } else if (tableTokenMap.has(token)) {

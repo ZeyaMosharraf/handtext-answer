@@ -142,6 +142,7 @@ export function getTableCellSegs(cell: TableCellData | string | undefined): Seg[
 export interface MathBlockData {
   latex: string;
   display: "block" | "inline";
+  color?: string | undefined;
 }
 
 /** Stored in Block.graph when kind === "graph" */
@@ -401,7 +402,7 @@ function stripTextBlockWrappers(html: string): string {
  */
 export function parseHtmlContent(
   html: string,
-  mathBlocksMap = new Map<string, string>(),
+  mathBlocksMap = new Map<string, { latex: string; color?: string | undefined }>(),
   graphBlocksMap = new Map<string, string>(),
 ): Block[] {
   const blocks: Block[] = [];
@@ -413,10 +414,12 @@ export function parseHtmlContent(
   let mathCounter = mathBlocksMap.size;
   let tokenizedHtml = unwrappedHtml.replace(
     /<div[^>]*?(?:class=["'][^"']*math-block[^"']*["']|data-block-type=["']math["'])[^>]*data-latex=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>|<div[^>]*data-latex=["']([^"']*)["'][^>]*?(?:class=["'][^"']*math-block[^"']*["']|data-block-type=["']math["'])[^>]*>[\s\S]*?<\/div>/gi,
-    (_, latex1, latex2) => {
+    (fullMatch, latex1, latex2) => {
       const latex = unescapeHtml(latex1 || latex2 || "");
+      const colorMatch = fullMatch.match(/data-color=["']([^"']*)["']/i);
+      const color = colorMatch ? unescapeHtml(colorMatch[1] ?? "") : undefined;
       const token = `__MATH_BLOCK_TOKEN_${mathCounter++}__`;
-      mathBlocksMap.set(token, latex);
+      mathBlocksMap.set(token, { latex, color });
       return `<p data-math-token="${token}"></p>`;
     },
   );
@@ -460,9 +463,14 @@ export function parseHtmlContent(
     // Check if the block tag itself is a math-block token or container
     const tokenMatch = attrs.match(/data-math-token=["']([^"']*)["']/i);
     if (tokenMatch && mathBlocksMap.has(tokenMatch[1]!)) {
-      const latex = mathBlocksMap.get(tokenMatch[1]!)!;
+      const data = mathBlocksMap.get(tokenMatch[1]!)!;
+      const latex = data.latex;
       if (latex.trim()) {
-        blocks.push({ kind: "math", text: latex, math: { latex, display: "block" } });
+        blocks.push({
+          kind: "math",
+          text: latex,
+          math: { latex, display: "block", ...(data.color ? { color: data.color } : {}) },
+        });
       }
       continue;
     }
@@ -470,10 +478,12 @@ export function parseHtmlContent(
     const latexAttrMatch = attrs.match(/data-latex=["']([^"']*)["']/i);
     if (latexAttrMatch || attrs.includes("math-block")) {
       const latex = latexAttrMatch ? unescapeHtml(latexAttrMatch[1] ?? "") : inner.trim();
+      const colorMatch = attrs.match(/data-color=["']([^"']*)["']/i);
+      const color = colorMatch ? unescapeHtml(colorMatch[1] ?? "") : undefined;
       blocks.push({
         kind: "math",
         text: latex,
-        math: { latex, display: "block" },
+        math: { latex, display: "block", ...(color ? { color } : {}) },
       });
       continue;
     }
@@ -642,16 +652,25 @@ export function parseHtmlContent(
             blocks.push({ kind: "paragraph", text: segText(beforeSegs), segs: beforeSegs });
           }
           let latex = "";
+          let mathColor: string | undefined = undefined;
           const token = mMatch[1];
           if (token && mathBlocksMap.has(token)) {
-            latex = mathBlocksMap.get(token)!;
+            const data = mathBlocksMap.get(token)!;
+            latex = data.latex;
+            mathColor = data.color;
           } else {
             const divTag = mMatch[0];
             const lMatch = divTag.match(/data-latex=["']([^"']*)["']/i);
+            const cMatch = divTag.match(/data-color=["']([^"']*)["']/i);
             latex = lMatch ? unescapeHtml(lMatch[1] ?? "") : "";
+            mathColor = cMatch ? unescapeHtml(cMatch[1] ?? "") : undefined;
           }
           if (latex) {
-            blocks.push({ kind: "math", text: latex, math: { latex, display: "block" } });
+            blocks.push({
+              kind: "math",
+              text: latex,
+              math: { latex, display: "block", ...(mathColor ? { color: mathColor } : {}) },
+            });
           }
           lastInnerIdx = mathPattern.lastIndex;
         }

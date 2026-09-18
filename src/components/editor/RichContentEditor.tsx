@@ -114,9 +114,20 @@ function sanitizeForEditor(rawHtml: string): string {
   return clean || "<p><br></p>";
 }
 
-function formatMathBlockInner(latex: string): string {
+export const MATH_INK_COLORS = [
+  { id: "blue", label: "Classic Blue", hex: "#1d3fb5" },
+  { id: "royal", label: "Royal Blue", hex: "#174ea6" },
+  { id: "black", label: "Black", hex: "#141821" },
+  { id: "red", label: "Red", hex: "#b3231f" },
+  { id: "green", label: "Green", hex: "#146b3a" },
+  { id: "purple", label: "Purple", hex: "#7e22ce" },
+];
+
+function formatMathBlockInner(latex: string, color?: string): string {
   const digitalHtml = renderDigitalMathToHtml(latex);
-  return `<span class="math-digital-content" style="display:inline-flex;align-items:center;vertical-align:middle;">${digitalHtml}</span><span class="math-chip-actions" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;opacity:0.65;font-size:11px;font-family:sans-serif;"><span class="math-chip-copy" title="Copy formula (Ctrl+C)" style="cursor:pointer;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,0.06);font-weight:500;">Copy</span><span class="math-chip-edit" title="Edit formula" style="cursor:pointer;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,0.06);font-weight:500;">Edit</span></span>`;
+  const colorStyle = color ? `color:${color};` : "";
+  const swatchBg = color || "#1d3fb5";
+  return `<span class="math-digital-content" style="display:inline-flex;align-items:center;vertical-align:middle;${colorStyle}">${digitalHtml}</span><span class="math-chip-actions" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;opacity:0.8;font-size:11px;font-family:sans-serif;"><span class="math-chip-color" title="Math ink color" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,0.06);font-weight:500;"><span class="math-color-swatch" style="display:inline-block;width:7px;height:7px;border-radius:50%;background-color:${swatchBg};border:1px solid rgba(0,0,0,0.25);"></span>Color</span><span class="math-chip-copy" title="Copy formula (Ctrl+C)" style="cursor:pointer;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,0.06);font-weight:500;">Copy</span><span class="math-chip-edit" title="Edit formula" style="cursor:pointer;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,0.06);font-weight:500;">Edit</span></span>`;
 }
 
 function formatGraphBlockInner(definition: GraphDefinition): string {
@@ -139,6 +150,35 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       blackInk: false,
       hasSelection: false,
     });
+
+    const [mathColorMenu, setMathColorMenu] = useState<{
+      mathBlock: HTMLElement;
+      top: number;
+      left: number;
+      currentColor: string | undefined;
+    } | null>(null);
+
+    useEffect(() => {
+      if (!mathColorMenu) return;
+      const handleClickOutside = (e: MouseEvent) => {
+        const popover = document.getElementById("math-block-color-popover");
+        if (popover && !popover.contains(e.target as Node)) {
+          setMathColorMenu(null);
+        }
+      };
+      const handleScroll = () => setMathColorMenu(null);
+      const handleKey = (e: KeyboardEvent) => {
+        if (e.key === "Escape") setMathColorMenu(null);
+      };
+      document.addEventListener("mousedown", handleClickOutside);
+      window.addEventListener("scroll", handleScroll, true);
+      window.addEventListener("keydown", handleKey);
+      return () => {
+        document.removeEventListener("mousedown", handleClickOutside);
+        window.removeEventListener("scroll", handleScroll, true);
+        window.removeEventListener("keydown", handleKey);
+      };
+    }, [mathColorMenu]);
 
     const queryActiveFormats = useCallback((): FormatState => {
       if (typeof document === "undefined" || !editorRef.current) {
@@ -307,8 +347,9 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       const mathElements = container.querySelectorAll<HTMLElement>(".math-block[data-latex]");
       mathElements.forEach((mEl) => {
         const latex = mEl.getAttribute("data-latex") ?? "";
-        if (latex && !mEl.querySelector(".math-digital-content")) {
-          mEl.innerHTML = formatMathBlockInner(latex);
+        const color = mEl.getAttribute("data-color") || undefined;
+        if (latex && (!mEl.querySelector(".math-digital-content") || !mEl.querySelector(".math-chip-color"))) {
+          mEl.innerHTML = formatMathBlockInner(latex, color);
         }
       });
       const graphElements = container.querySelectorAll<HTMLElement>(".graph-block[data-graph-definition]");
@@ -612,6 +653,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         const latex = mathBlock.getAttribute("data-latex") ?? "";
         const naturalExpr = mathBlock.getAttribute("data-natural-expr") || latex;
         const blockId = mathBlock.getAttribute("data-block-id") || undefined;
+        const color = mathBlock.getAttribute("data-color") || undefined;
         const displayMode =
           (mathBlock.getAttribute("data-display-mode") as "block" | "compact") || "block";
 
@@ -621,6 +663,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
             latex,
             naturalExpr,
             displayMode,
+            color,
           },
           clipboardData,
         );
@@ -665,6 +708,9 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         mathDiv.setAttribute("data-latex", trimmed);
         mathDiv.setAttribute("data-natural-expr", naturalExpr);
         mathDiv.setAttribute("data-display-mode", displayMode);
+        if (payload.color) {
+          mathDiv.setAttribute("data-color", payload.color);
+        }
         mathDiv.setAttribute("contenteditable", "false");
         mathDiv.setAttribute("tabindex", "0");
         mathDiv.style.cssText =
@@ -672,7 +718,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
           "margin:4px 0;border-radius:6px;background:rgba(99,102,241,0.08);" +
           "border:1px solid rgba(99,102,241,0.25);cursor:pointer;user-select:none;" +
           "font-size:1em;color:#1e1b4b;vertical-align:middle;";
-        mathDiv.innerHTML = formatMathBlockInner(trimmed);
+        mathDiv.innerHTML = formatMathBlockInner(trimmed, payload.color);
 
         const createTrailingParagraph = () => {
           const p = document.createElement("p");
@@ -984,7 +1030,8 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         }
         const trimmed = latex.trim();
         mathEl.setAttribute("data-latex", trimmed);
-        mathEl.innerHTML = formatMathBlockInner(trimmed);
+        const existingColor = mathEl.getAttribute("data-color") || undefined;
+        mathEl.innerHTML = formatMathBlockInner(trimmed, existingColor);
         currentMathElementRef.current = null;
         triggerChange();
         updateFormatState();
@@ -1324,193 +1371,292 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       }
     };
 
+    const handleSelectMathColor = useCallback(
+      (newColor: string | undefined) => {
+        if (!mathColorMenu?.mathBlock) return;
+        const block = mathColorMenu.mathBlock;
+        if (newColor) {
+          block.setAttribute("data-color", newColor);
+        } else {
+          block.removeAttribute("data-color");
+        }
+        const latex = block.getAttribute("data-latex") ?? "";
+        block.innerHTML = formatMathBlockInner(latex, newColor);
+        setMathColorMenu(null);
+        triggerChange();
+      },
+      [mathColorMenu, triggerChange],
+    );
+
     return (
-      <div
-        ref={editorRef}
-        contentEditable
-        suppressContentEditableWarning
-        role="textbox"
-        aria-multiline="true"
-        aria-label="Answer content editor"
-        data-placeholder={placeholder}
-        onInput={triggerChange}
-        onKeyDown={handleKeyDown}
-        onPaste={handlePaste}
-        onCopy={(e) => {
-          const sel = window.getSelection();
-          const hasTextSel = sel && !sel.isCollapsed && sel.toString().length > 0;
-          if (
-            !hasTextSel &&
-            selectedMathElementRef.current &&
-            editorRef.current?.contains(selectedMathElementRef.current)
-          ) {
-            e.preventDefault();
-            copyMathBlockFromElement(selectedMathElementRef.current, e.clipboardData);
-          }
-        }}
-        onDoubleClick={(e) => {
-          const target = e.target as HTMLElement | null;
-          const mathBlock = target?.closest?.(".math-block") as HTMLElement | null;
-          if (mathBlock) {
-            e.stopPropagation();
-            const latex = mathBlock.getAttribute("data-latex") ?? "";
-            selectMathElement(mathBlock);
-            onMathBlockClick?.(latex, mathBlock);
-          }
-        }}
-        onBlur={saveSelection}
-        onKeyUp={() => {
-          saveSelection();
-          updateFormatState();
-        }}
-        onMouseUp={() => {
-          saveSelection();
-          updateFormatState();
-        }}
-        onFocus={updateFormatState}
-        onMouseDown={(e) => {
-          const el = editorRef.current;
-          if (!el) return;
-          const target = e.target as HTMLElement | null;
-          if (target === el) {
-            const lastChild = el.lastElementChild;
-            const lastRect = lastChild?.getBoundingClientRect();
-            if (!lastRect || e.clientY >= lastRect.bottom - 4) {
+      <>
+        <div
+          ref={editorRef}
+          contentEditable
+          suppressContentEditableWarning
+          role="textbox"
+          aria-multiline="true"
+          aria-label="Answer content editor"
+          data-placeholder={placeholder}
+          onInput={triggerChange}
+          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
+          onCopy={(e) => {
+            const sel = window.getSelection();
+            const hasTextSel = sel && !sel.isCollapsed && sel.toString().length > 0;
+            if (
+              !hasTextSel &&
+              selectedMathElementRef.current &&
+              editorRef.current?.contains(selectedMathElementRef.current)
+            ) {
               e.preventDefault();
-              el.focus();
-              let targetP: HTMLElement;
-              if (
-                lastChild &&
-                lastChild.tagName === "P" &&
-                (!lastChild.textContent?.trim() || lastChild.innerHTML === "<br>")
-              ) {
-                targetP = lastChild as HTMLElement;
-              } else {
-                targetP = document.createElement("p");
-                targetP.innerHTML = "<br>";
-                el.appendChild(targetP);
-                triggerChange();
-              }
-              const sel = window.getSelection();
-              if (sel) {
-                const range = document.createRange();
-                range.setStart(targetP, 0);
-                range.collapse(true);
-                sel.removeAllRanges();
-                sel.addRange(range);
-                savedRangeRef.current = range.cloneRange();
-              }
-              currentMathElementRef.current = null;
-              updateFormatState();
+              copyMathBlockFromElement(selectedMathElementRef.current, e.clipboardData);
             }
-          }
-        }}
-        onClick={(e) => {
-          const el = editorRef.current;
-          if (!el) return;
-          const target = e.target as HTMLElement | null;
-
-          // Check if copy button on math chip was clicked
-          const copyBtn = target?.closest?.(".math-chip-copy") as HTMLElement | null;
-          if (copyBtn) {
-            e.stopPropagation();
-            const mathBlock = copyBtn.closest(".math-block") as HTMLElement | null;
+          }}
+          onDoubleClick={(e) => {
+            const target = e.target as HTMLElement | null;
+            const mathBlock = target?.closest?.(".math-block") as HTMLElement | null;
             if (mathBlock) {
-              selectMathElement(mathBlock);
-              copyMathBlockFromElement(mathBlock);
-            }
-            return;
-          }
-
-          // Check if edit button on math chip was clicked
-          const editBtn = target?.closest?.(".math-chip-edit") as HTMLElement | null;
-          if (editBtn) {
-            e.stopPropagation();
-            const mathBlock = editBtn.closest(".math-block") as HTMLElement | null;
-            if (mathBlock) {
+              e.stopPropagation();
               const latex = mathBlock.getAttribute("data-latex") ?? "";
               selectMathElement(mathBlock);
               onMathBlockClick?.(latex, mathBlock);
             }
-            return;
-          }
-
-          // Check if math block itself was clicked (selects it)
-          const mathBlock = target?.closest?.(".math-block") as HTMLElement | null;
-          if (mathBlock) {
-            selectMathElement(mathBlock);
-            return;
-          }
-
-          // Clicked outside math block -> deselect
-          if (selectedMathElementRef.current) {
-            selectMathElement(null);
-          }
-
-          const graphBlock = target?.closest?.(".graph-block") as HTMLElement | null;
-          if (graphBlock) {
-            const defJson = graphBlock.getAttribute("data-graph-definition") ?? "";
-            try {
-              const def = JSON.parse(defJson) as GraphDefinition;
-              const blockId = graphBlock.getAttribute("data-block-id") || "";
-              onGraphBlockClick?.(def, blockId);
-            } catch {}
-            return;
-          }
-
-          currentMathElementRef.current = null;
-
-          if (target === el) {
-            const lastChild = el.lastElementChild;
-            const lastRect = lastChild?.getBoundingClientRect();
-            if (!lastRect || e.clientY >= lastRect.bottom - 4) {
-              let targetP =
-                lastChild &&
-                lastChild.tagName === "P" &&
-                (!lastChild.textContent?.trim() || lastChild.innerHTML === "<br>")
-                  ? (lastChild as HTMLElement)
-                  : null;
-              if (!targetP) {
-                targetP = document.createElement("p");
-                targetP.innerHTML = "<br>";
-                el.appendChild(targetP);
-                triggerChange();
+          }}
+          onBlur={saveSelection}
+          onKeyUp={() => {
+            saveSelection();
+            updateFormatState();
+          }}
+          onMouseUp={() => {
+            saveSelection();
+            updateFormatState();
+          }}
+          onFocus={updateFormatState}
+          onMouseDown={(e) => {
+            const el = editorRef.current;
+            if (!el) return;
+            const target = e.target as HTMLElement | null;
+            if (target === el) {
+              const lastChild = el.lastElementChild;
+              const lastRect = lastChild?.getBoundingClientRect();
+              if (!lastRect || e.clientY >= lastRect.bottom - 4) {
+                e.preventDefault();
+                el.focus();
+                let targetP: HTMLElement;
+                if (
+                  lastChild &&
+                  lastChild.tagName === "P" &&
+                  (!lastChild.textContent?.trim() || lastChild.innerHTML === "<br>")
+                ) {
+                  targetP = lastChild as HTMLElement;
+                } else {
+                  targetP = document.createElement("p");
+                  targetP.innerHTML = "<br>";
+                  el.appendChild(targetP);
+                  triggerChange();
+                }
+                const sel = window.getSelection();
+                if (sel) {
+                  const range = document.createRange();
+                  range.setStart(targetP, 0);
+                  range.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(range);
+                  savedRangeRef.current = range.cloneRange();
+                }
+                currentMathElementRef.current = null;
+                updateFormatState();
               }
-              const sel = window.getSelection();
-              if (sel) {
-                const range = document.createRange();
-                range.setStart(targetP, 0);
-                range.collapse(true);
-                sel.removeAllRanges();
-                sel.addRange(range);
-                savedRangeRef.current = range.cloneRange();
-              }
-              updateFormatState();
             }
-          }
-        }}
-        className={cn(
-          "min-h-0 flex-1 rounded-lg border border-input bg-card p-4 text-base leading-relaxed text-foreground outline-none transition-colors cursor-text",
-          "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
-          "overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]",
-          "[&_h1]:mb-3 [&_h1]:mt-4 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:tracking-tight",
-          "[&_h2]:mb-2 [&_h2]:mt-3 [&_h2]:text-xl [&_h2]:font-semibold",
-          "[&_p]:mb-2.5",
-          "[&_ul]:mb-3 [&_ul]:ml-6 [&_ul]:list-disc",
-          "[&_ol]:mb-3 [&_ol]:ml-6 [&_ol]:list-decimal",
-          "[&_li]:mb-1",
-          "[&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-primary/40 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground",
-          "[&_hr]:my-4 [&_hr]:border-border",
-          "[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:border [&_table]:border-border [&_table]:cursor-text",
-          "[&_thead]:cursor-text [&_tbody]:cursor-text [&_tr]:cursor-text",
-          "[&_th]:border [&_th]:border-border [&_th]:bg-muted/40 [&_th]:p-2 [&_th]:font-semibold [&_th]:cursor-text [&_th]:whitespace-pre-wrap",
-          "[&_td]:border [&_td]:border-border [&_td]:p-2 [&_td]:cursor-text [&_td]:whitespace-pre-wrap",
-          "[&_strong]:font-bold",
-          "[&_em]:italic",
-          "[&_u]:underline",
-          className,
+          }}
+          onClick={(e) => {
+            const el = editorRef.current;
+            if (!el) return;
+            const target = e.target as HTMLElement | null;
+
+            // Check if color button on math chip was clicked
+            const colorBtn = target?.closest?.(".math-chip-color") as HTMLElement | null;
+            if (colorBtn) {
+              e.stopPropagation();
+              const mathBlock = colorBtn.closest(".math-block") as HTMLElement | null;
+              if (mathBlock) {
+                selectMathElement(mathBlock);
+                const rect = colorBtn.getBoundingClientRect();
+                const currentColor = mathBlock.getAttribute("data-color") || undefined;
+                setMathColorMenu({
+                  mathBlock,
+                  top: rect.bottom + 4,
+                  left: Math.max(8, Math.min(rect.left, window.innerWidth - 210)),
+                  currentColor,
+                });
+              }
+              return;
+            }
+
+            // Check if copy button on math chip was clicked
+            const copyBtn = target?.closest?.(".math-chip-copy") as HTMLElement | null;
+            if (copyBtn) {
+              e.stopPropagation();
+              const mathBlock = copyBtn.closest(".math-block") as HTMLElement | null;
+              if (mathBlock) {
+                selectMathElement(mathBlock);
+                copyMathBlockFromElement(mathBlock);
+              }
+              return;
+            }
+
+            // Check if edit button on math chip was clicked
+            const editBtn = target?.closest?.(".math-chip-edit") as HTMLElement | null;
+            if (editBtn) {
+              e.stopPropagation();
+              const mathBlock = editBtn.closest(".math-block") as HTMLElement | null;
+              if (mathBlock) {
+                const latex = mathBlock.getAttribute("data-latex") ?? "";
+                selectMathElement(mathBlock);
+                onMathBlockClick?.(latex, mathBlock);
+              }
+              return;
+            }
+
+            // Check if math block itself was clicked (selects it)
+            const mathBlock = target?.closest?.(".math-block") as HTMLElement | null;
+            if (mathBlock) {
+              selectMathElement(mathBlock);
+              return;
+            }
+
+            // Clicked outside math block -> deselect
+            if (selectedMathElementRef.current) {
+              selectMathElement(null);
+            }
+            if (mathColorMenu) {
+              setMathColorMenu(null);
+            }
+
+            const graphBlock = target?.closest?.(".graph-block") as HTMLElement | null;
+            if (graphBlock) {
+              const defJson = graphBlock.getAttribute("data-graph-definition") ?? "";
+              try {
+                const def = JSON.parse(defJson) as GraphDefinition;
+                const blockId = graphBlock.getAttribute("data-block-id") || "";
+                onGraphBlockClick?.(def, blockId);
+              } catch {}
+              return;
+            }
+
+            currentMathElementRef.current = null;
+
+            if (target === el) {
+              const lastChild = el.lastElementChild;
+              const lastRect = lastChild?.getBoundingClientRect();
+              if (!lastRect || e.clientY >= lastRect.bottom - 4) {
+                let targetP =
+                  lastChild &&
+                  lastChild.tagName === "P" &&
+                  (!lastChild.textContent?.trim() || lastChild.innerHTML === "<br>")
+                    ? (lastChild as HTMLElement)
+                    : null;
+                if (!targetP) {
+                  targetP = document.createElement("p");
+                  targetP.innerHTML = "<br>";
+                  el.appendChild(targetP);
+                  triggerChange();
+                }
+                const sel = window.getSelection();
+                if (sel) {
+                  const range = document.createRange();
+                  range.setStart(targetP, 0);
+                  range.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(range);
+                  savedRangeRef.current = range.cloneRange();
+                }
+                updateFormatState();
+              }
+            }
+          }}
+          className={cn(
+            "min-h-0 flex-1 rounded-lg border border-input bg-card p-4 text-base leading-relaxed text-foreground outline-none transition-colors cursor-text",
+            "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
+            "overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]",
+            "[&_h1]:mb-3 [&_h1]:mt-4 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:tracking-tight",
+            "[&_h2]:mb-2 [&_h2]:mt-3 [&_h2]:text-xl [&_h2]:font-semibold",
+            "[&_p]:mb-2.5",
+            "[&_ul]:mb-3 [&_ul]:ml-6 [&_ul]:list-disc",
+            "[&_ol]:mb-3 [&_ol]:ml-6 [&_ol]:list-decimal",
+            "[&_li]:mb-1",
+            "[&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-primary/40 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground",
+            "[&_hr]:my-4 [&_hr]:border-border",
+            "[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:border [&_table]:border-border [&_table]:cursor-text",
+            "[&_thead]:cursor-text [&_tbody]:cursor-text [&_tr]:cursor-text",
+            "[&_th]:border [&_th]:border-border [&_th]:bg-muted/40 [&_th]:p-2 [&_th]:font-semibold [&_th]:cursor-text [&_th]:whitespace-pre-wrap",
+            "[&_td]:border [&_td]:border-border [&_td]:p-2 [&_td]:cursor-text [&_td]:whitespace-pre-wrap",
+            "[&_strong]:font-bold",
+            "[&_em]:italic",
+            "[&_u]:underline",
+            className,
+          )}
+        />
+        {mathColorMenu && (
+          <div
+            id="math-block-color-popover"
+            style={{
+              position: "fixed",
+              top: mathColorMenu.top,
+              left: mathColorMenu.left,
+              zIndex: 9999,
+            }}
+            className="w-48 rounded-lg border border-border bg-popover p-2 shadow-lg backdrop-blur animate-in fade-in zoom-in-95 cursor-default select-none text-popover-foreground"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Math Ink Color
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {MATH_INK_COLORS.map((ink) => (
+                <button
+                  key={ink.id}
+                  type="button"
+                  onClick={() => handleSelectMathColor(ink.hex)}
+                  title={ink.label}
+                  className="flex flex-col items-center gap-1 rounded p-1 text-[10px] transition-colors hover:bg-accent cursor-pointer"
+                >
+                  <span
+                    className={cn(
+                      "size-5 rounded-full border border-black/20 shadow-xs transition-transform hover:scale-110",
+                      mathColorMenu.currentColor?.toLowerCase() === ink.hex.toLowerCase() &&
+                        "ring-2 ring-primary ring-offset-1",
+                    )}
+                    style={{ backgroundColor: ink.hex }}
+                  />
+                  <span className="truncate max-w-full text-center text-muted-foreground">
+                    {ink.label.split(" ")[0]}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 border-t border-border pt-1.5 flex items-center justify-between text-xs">
+              <button
+                type="button"
+                onClick={() => handleSelectMathColor(undefined)}
+                className="rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+              >
+                Default ink
+              </button>
+              <label className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer px-1.5 py-0.5 rounded hover:bg-accent">
+                <span>Custom</span>
+                <input
+                  type="color"
+                  value={mathColorMenu.currentColor || "#1d3fb5"}
+                  onChange={(e) => handleSelectMathColor(e.target.value)}
+                  className="size-4 p-0 border-0 rounded cursor-pointer"
+                />
+              </label>
+            </div>
+          </div>
         )}
-      />
+      </>
     );
   },
 );

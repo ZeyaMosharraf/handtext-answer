@@ -293,6 +293,8 @@ export interface DigitalMathProps {
   nodes: MathNode[];
   /** Additional CSS class */
   className?: string;
+  /** Optional inline CSS styles (e.g. custom formula ink color) */
+  style?: React.CSSProperties | undefined;
 }
 
 /**
@@ -301,7 +303,7 @@ export interface DigitalMathProps {
  * Used exclusively by the LEFT document editor (MathBlockView).
  * The RIGHT handwritten page preview continues to use layoutMath() + box.draw().
  */
-export function DigitalMath({ nodes, className }: DigitalMathProps): React.ReactElement {
+export function DigitalMath({ nodes, className, style }: DigitalMathProps): React.ReactElement {
   return (
     <span
       className={className}
@@ -312,6 +314,7 @@ export function DigitalMath({ nodes, className }: DigitalMathProps): React.React
         fontSize: "1em",
         lineHeight: 1.5,
         color: "inherit",
+        ...style,
       }}
     >
       {renderNodes(nodes, "root")}

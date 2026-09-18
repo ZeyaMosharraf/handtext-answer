@@ -202,6 +202,7 @@ export const BlockListContainer: React.FC<BlockListContainerProps> = ({
                 onSelect={() => onSelectBlock(block.id)}
                 onEdit={() => onEditMathBlock?.(block as MathBlock)}
                 onDelete={() => onDeleteBlock(block.id)}
+                onChangeColor={(color) => onUpdateBlock<MathBlock>(block.id, { color })}
               />
             );
 

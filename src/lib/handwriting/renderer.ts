@@ -429,8 +429,9 @@ function drawMathBlock(
 
   // Left-align with content margin matching normal handwritten lines
   const startX = coordinates.contentLeft;
+  const mathInk = placement.color || ink;
 
-  box.draw(ctx, startX, baselineY, settings, random, ink);
+  box.draw(ctx, startX, baselineY, settings, random, mathInk);
 }
 
 function drawGraphBlock(

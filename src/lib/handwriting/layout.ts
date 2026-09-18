@@ -59,6 +59,7 @@ export interface LayoutMathBlock {
   lineIndex: number;
   lineUnits: number;
   latex: string;
+  color?: string | undefined;
 }
 
 export interface LayoutGraphBlock {
@@ -117,6 +118,7 @@ interface FlowMathBlock {
   latex: string;
   lineUnits: number;
   gapLines: number;
+  color?: string | undefined;
 }
 
 interface FlowGraphBlock {
@@ -612,8 +614,9 @@ function mathFlowBlock(
   // Do not inflate single-line formulas with arbitrary padding:
   // rulingSpacing already includes standard inter-line leading.
   const lineUnits = computeLineUnits(box, coords.rulingSpacing, 0);
+  const color = block.math?.color;
 
-  return [{ type: "mathBlock", latex, lineUnits, gapLines: 0 }];
+  return [{ type: "mathBlock", latex, lineUnits, gapLines: 0, ...(color ? { color } : {}) }];
 }
 
 function graphFlowBlock(
@@ -767,7 +770,13 @@ function paginate(
         underline: item.underline,
       });
     } else if (item.type === "mathBlock") {
-      placements.push({ type: "mathBlock", lineIndex, lineUnits: item.lineUnits, latex: item.latex });
+      placements.push({
+        type: "mathBlock",
+        lineIndex,
+        lineUnits: item.lineUnits,
+        latex: item.latex,
+        ...(item.color ? { color: item.color } : {}),
+      });
     } else if (item.type === "graphBlock") {
       placements.push({ type: "graphBlock", lineIndex, lineUnits: item.lineUnits, definition: item.definition });
     } else {

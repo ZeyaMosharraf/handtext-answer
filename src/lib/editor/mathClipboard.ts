@@ -23,6 +23,7 @@ export interface MathClipboardPayload {
   latex: string;
   naturalExpr: string;
   displayMode: "block" | "compact";
+  color?: string | undefined;
   sourceBlockId?: string | undefined;
 }
 
@@ -38,6 +39,7 @@ export function serializeMathBlockToClipboard(
     latex: string;
     naturalExpr?: string | undefined;
     displayMode?: "block" | "compact" | undefined;
+    color?: string | undefined;
   },
   clipboardData?: DataTransfer | null
 ): MathClipboardPayload {
@@ -47,6 +49,7 @@ export function serializeMathBlockToClipboard(
     latex: block.latex || block.naturalExpr || "",
     naturalExpr: block.naturalExpr || block.latex || "",
     displayMode: block.displayMode === "compact" ? "compact" : "block",
+    ...(block.color ? { color: block.color } : {}),
     sourceBlockId: block.id,
   };
 
@@ -92,6 +95,7 @@ export function deserializeMathBlockFromClipboard(
             latex: parsed.latex.trim(),
             naturalExpr: (parsed.naturalExpr || parsed.latex).trim(),
             displayMode: parsed.displayMode === "compact" ? "compact" : "block",
+            color: typeof parsed.color === "string" && parsed.color.trim() ? parsed.color.trim() : undefined,
             sourceBlockId: parsed.sourceBlockId,
           };
         }
@@ -131,6 +135,7 @@ export function createPastedMathBlock(payload: MathClipboardPayload): MathBlock 
     latex: payload.latex,
     naturalExpr: payload.naturalExpr || payload.latex,
     displayMode: payload.displayMode || "block",
+    ...(payload.color ? { color: payload.color } : {}),
     createdAt: Date.now(),
   };
 }

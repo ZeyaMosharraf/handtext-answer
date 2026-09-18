@@ -32,7 +32,7 @@
  * 7. React.memo: adjacent TextBlock typing causes zero re-renders here.
  */
 
-import React, { useCallback, useMemo, useState, useEffect } from "react";
+import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import type { MathBlock } from "@/types/document";
 import { cn } from "@/lib/utils";
 import { Edit2, Trash2, AlertCircle, Copy } from "lucide-react";
@@ -41,6 +41,7 @@ import { parseMath } from "@/lib/math";
 import { DigitalMath } from "@/lib/math/digitalRenderer";
 import type { MathNode } from "@/lib/math";
 import { serializeMathBlockToClipboard } from "@/lib/editor/mathClipboard";
+import { MATH_INK_COLORS } from "./RichContentEditor";
 
 export interface MathBlockViewProps {
   block: MathBlock;
@@ -48,6 +49,7 @@ export interface MathBlockViewProps {
   onSelect?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  onChangeColor?: (color: string | undefined) => void;
   className?: string;
 }
 
@@ -58,6 +60,7 @@ export const MathBlockView: React.FC<MathBlockViewProps> = React.memo(
     onSelect,
     onEdit,
     onDelete,
+    onChangeColor,
     className,
   }) => {
     const formula = (block.latex || block.naturalExpr || "").trim();
@@ -83,6 +86,19 @@ export const MathBlockView: React.FC<MathBlockViewProps> = React.memo(
     }, [isSelected, escDeselect]);
 
     const [copied, setCopied] = useState(false);
+    const [colorMenuOpen, setColorMenuOpen] = useState(false);
+    const colorMenuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+      if (!colorMenuOpen) return;
+      const handleClickOutside = (e: MouseEvent) => {
+        if (colorMenuRef.current && !colorMenuRef.current.contains(e.target as Node)) {
+          setColorMenuOpen(false);
+        }
+      };
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [colorMenuOpen]);
     const handleCopy = useCallback(
       (e?: React.SyntheticEvent) => {
         e?.stopPropagation();
@@ -145,7 +161,10 @@ export const MathBlockView: React.FC<MathBlockViewProps> = React.memo(
         )}
       >
         {/* ── Digital Math Content ────────────────────────────────────── */}
-        <div className="flex flex-1 items-center gap-3 overflow-x-auto py-0.5 min-w-0">
+        <div
+          className="flex flex-1 items-center gap-3 overflow-x-auto py-0.5 min-w-0"
+          style={block.color ? { color: block.color } : undefined}
+        >
           {!formula ? (
             <span className="text-xs italic text-muted-foreground">
               Empty formula — double-click to edit
@@ -167,7 +186,8 @@ export const MathBlockView: React.FC<MathBlockViewProps> = React.memo(
             // Digital computer-style math — clean, readable, no handwriting
             <DigitalMath
               nodes={parsedNodes!}
-              className="text-base leading-none text-foreground"
+              className="text-base leading-none"
+              style={block.color ? { color: block.color } : undefined}
             />
           )}
 
@@ -185,6 +205,85 @@ export const MathBlockView: React.FC<MathBlockViewProps> = React.memo(
             isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-80"
           )}
         >
+          {/* Color control */}
+          <div className="relative">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={(e) => {
+                e.stopPropagation();
+                setColorMenuOpen((v) => !v);
+              }}
+              title="Math ink color"
+              className="h-6 gap-1 px-1.5 text-muted-foreground hover:bg-primary/10 hover:text-primary cursor-pointer"
+            >
+              <span
+                className="size-2.5 rounded-full border border-black/20"
+                style={{ backgroundColor: block.color || "#1d3fb5" }}
+              />
+              <span className="text-[11px]">Color</span>
+            </Button>
+            {colorMenuOpen && (
+              <div
+                ref={colorMenuRef}
+                className="absolute right-0 top-full z-50 mt-1 w-44 rounded-lg border border-border bg-popover p-2 shadow-lg backdrop-blur cursor-default select-none text-popover-foreground animate-in fade-in zoom-in-95"
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Math Ink Color
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {MATH_INK_COLORS.map((ink) => (
+                    <button
+                      key={ink.id}
+                      type="button"
+                      onClick={() => {
+                        onChangeColor?.(ink.hex);
+                        setColorMenuOpen(false);
+                      }}
+                      title={ink.label}
+                      className="flex flex-col items-center gap-1 rounded p-1 text-[10px] transition-colors hover:bg-accent cursor-pointer"
+                    >
+                      <span
+                        className={cn(
+                          "size-5 rounded-full border border-black/20 shadow-xs transition-transform hover:scale-110",
+                          block.color?.toLowerCase() === ink.hex.toLowerCase() &&
+                            "ring-2 ring-primary ring-offset-1",
+                        )}
+                        style={{ backgroundColor: ink.hex }}
+                      />
+                      <span className="truncate max-w-full text-center text-muted-foreground">
+                        {ink.label.split(" ")[0]}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 border-t border-border pt-1.5 flex items-center justify-between text-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onChangeColor?.(undefined);
+                      setColorMenuOpen(false);
+                    }}
+                    className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+                  >
+                    Default
+                  </button>
+                  <label className="flex items-center gap-1 text-muted-foreground hover:text-foreground cursor-pointer px-1 rounded hover:bg-accent">
+                    <span>Custom</span>
+                    <input
+                      type="color"
+                      value={block.color || "#1d3fb5"}
+                      onChange={(e) => onChangeColor?.(e.target.value)}
+                      className="size-4 p-0 border-0 rounded cursor-pointer"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
           <Button
             type="button"
             size="sm"

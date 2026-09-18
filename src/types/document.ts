@@ -39,6 +39,8 @@ export interface MathBlock extends BaseBlock {
   latex: string;
   /** Display mode: 'block' (centered display formula) or 'compact' (inline/left-aligned) */
   displayMode: "block" | "compact";
+  /** Optional custom ink/color for this specific math block (e.g. "#1d3fb5") */
+  color?: string | undefined;
 }
 
 export interface TableBlock extends BaseBlock {
@@ -93,6 +95,7 @@ export function createMathBlock(
   naturalExpr: string,
   latex: string,
   displayMode: "block" | "compact" = "block",
+  color?: string | undefined,
 ): MathBlock {
   return {
     id: generateBlockId("math"),
@@ -100,6 +103,7 @@ export function createMathBlock(
     naturalExpr,
     latex,
     displayMode,
+    ...(color !== undefined && color !== null ? { color } : {}),
     createdAt: Date.now(),
   };
 }
