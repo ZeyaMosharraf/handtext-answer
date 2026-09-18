@@ -23,6 +23,8 @@ export type {
   GroupedNode,
   BigOpNode,
   SpaceNode,
+  MatrixNode,
+  MatrixEnvironment,
   MathLayoutBox,
   MathBlockData,
 } from "./types";

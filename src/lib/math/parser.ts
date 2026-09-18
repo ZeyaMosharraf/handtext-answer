@@ -19,6 +19,8 @@ import type {
   GroupedNode,
   BigOpNode,
   SpaceNode,
+  MatrixNode,
+  MatrixEnvironment,
 } from "./types";
 import { tokenize, type Token, type TokenKind } from "./tokens";
 
@@ -66,6 +68,10 @@ const SPACE_WIDTHS: Record<string, number> = {
   "\\,": 0.17, "\\;": 0.28, "\\:": 0.22, "\\!": -0.17,
   "\\quad": 1.0, "\\qquad": 2.0, "\\ ": 0.33,
 };
+
+const MATRIX_ENVS = new Set([
+  "matrix", "pmatrix", "bmatrix", "Bmatrix", "vmatrix", "Vmatrix", "array",
+]);
 
 // ─── Parser State ─────────────────────────────────────────────────────────────
 
@@ -146,6 +152,128 @@ class Parser {
       if (node) nodes.push(node);
     }
     return nodes;
+  }
+
+  /** Parse environment name inside { ... } */
+  private parseEnvironmentName(): string {
+    const t = this.peek();
+    if (t.kind === "LBRACE") {
+      this.consume();
+      let name = "";
+      while (!this.atEnd() && this.peek().kind !== "RBRACE") {
+        name += this.consume().value;
+      }
+      if (this.peek().kind === "RBRACE") {
+        this.consume();
+      }
+      return name.trim();
+    }
+    if (t.kind === "IDENT") {
+      let name = "";
+      while (!this.atEnd() && this.peek().kind === "IDENT") {
+        name += this.consume().value;
+      }
+      return name.trim();
+    }
+    return "";
+  }
+
+  private isMatrixEnd(env: string): boolean {
+    const t = this.peek();
+    if (t.kind !== "COMMAND" || t.value !== "\\end") return false;
+    let idx = this.pos + 1;
+    if (this.tokens[idx]?.kind !== "LBRACE") return false;
+    idx++;
+    let endEnv = "";
+    while (idx < this.tokens.length && this.tokens[idx]?.kind !== "RBRACE") {
+      endEnv += this.tokens[idx]!.value;
+      idx++;
+    }
+    endEnv = endEnv.trim();
+    return endEnv === env || (env === "matrix" && (endEnv === "array" || endEnv.includes("matrix"))) || (env === "bmatrix" && endEnv.includes("matrix"));
+  }
+
+  private trimCellNodes(nodes: MathNode[]): MathNode[] {
+    let start = 0;
+    while (start < nodes.length && nodes[start]!.type === "space") {
+      start++;
+    }
+    let end = nodes.length;
+    while (end > start && nodes[end - 1]!.type === "space") {
+      end--;
+    }
+    return nodes.slice(start, end);
+  }
+
+  private parseMatrix(env: MatrixEnvironment): MathNode {
+    const rows: MathNode[][][] = [];
+    let currentRow: MathNode[][] = [];
+    let currentCell: MathNode[] = [];
+
+    while (!this.atEnd() && !this.isMatrixEnd(env)) {
+      const t = this.peek();
+
+      // Check for cell delimiter &
+      if (t.kind === "OPERATOR" && t.value === "&") {
+        this.consume();
+        currentRow.push(this.trimCellNodes(currentCell));
+        currentCell = [];
+        continue;
+      }
+
+      // Check for row delimiter \\
+      if (t.kind === "COMMAND" && t.value === "\\\\") {
+        this.consume();
+        currentRow.push(this.trimCellNodes(currentCell));
+        rows.push(currentRow);
+        currentRow = [];
+        currentCell = [];
+        continue;
+      }
+
+      // If generic \end is reached, exit matrix
+      if (t.kind === "COMMAND" && t.value === "\\end") {
+        break;
+      }
+
+      const node = this.parseNode();
+      if (node) {
+        currentCell.push(node);
+      }
+    }
+
+    // Push final cell and row (ignoring purely whitespace cells if currentRow is empty)
+    const trimmedLastCell = this.trimCellNodes(currentCell);
+    if (trimmedLastCell.length > 0 || currentRow.length > 0) {
+      currentRow.push(trimmedLastCell);
+      rows.push(currentRow);
+    }
+
+    // Consume \end and {env}
+    if (this.peek().kind === "COMMAND" && this.peek().value === "\\end") {
+      this.consume();
+      this.parseEnvironmentName();
+    }
+
+    // Normalize rows: ensure all rows have the same number of columns
+    const maxCols = Math.max(1, ...rows.map((r) => r.length));
+    const normalizedRows = rows.map((r) => {
+      const padded = [...r];
+      while (padded.length < maxCols) {
+        padded.push([]);
+      }
+      return padded;
+    });
+
+    if (normalizedRows.length === 0) {
+      normalizedRows.push([[]]);
+    }
+
+    return this.maybeSupSub([{
+      type: "matrix",
+      environment: env,
+      rows: normalizedRows,
+    } as MatrixNode]);
   }
 
   // ── Single token parsing ──────────────────────────────────────────────────
@@ -382,6 +510,26 @@ class Parser {
         // Return as identifier with strike — for now, just return the next node
         return next;
       }
+      return null;
+    }
+
+    // ── Environments (\begin{...} ... \end{...}) ────────────────────────────
+    if (name === "begin") {
+      const envName = this.parseEnvironmentName();
+      if (envName === "array") {
+        if (this.peek().kind === "LBRACE") {
+          this.parseEnvironmentName(); // column specifier {cc}
+        }
+        return this.parseMatrix("matrix");
+      }
+      if (MATRIX_ENVS.has(envName)) {
+        return this.parseMatrix(envName as MatrixEnvironment);
+      }
+      return this.maybeSupSub([{ type: "identifier", value: `\\begin{${envName}}` } as IdentifierNode]);
+    }
+
+    if (name === "end") {
+      this.parseEnvironmentName();
       return null;
     }
 

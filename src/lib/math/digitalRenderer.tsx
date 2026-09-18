@@ -24,7 +24,7 @@
  */
 
 import React from "react";
-import type { MathNode, FractionNode, SupSubNode, RootNode, GroupedNode, BigOpNode } from "./types";
+import type { MathNode, FractionNode, SupSubNode, RootNode, GroupedNode, BigOpNode, MatrixNode } from "./types";
 import { parseMath } from "./parser";
 
 // ─── Inline style helpers ────────────────────────────────────────────────────
@@ -103,6 +103,9 @@ function renderNode(node: MathNode, key: string): React.ReactNode {
 
     case "grouped":
       return renderGrouped(node as GroupedNode, key);
+
+    case "matrix":
+      return renderMatrix(node as MatrixNode, key);
 
     case "bigOp":
       return renderBigOp(node as BigOpNode, key);
@@ -286,6 +289,144 @@ function renderBigOp(node: BigOpNode, key: string): React.ReactNode {
   );
 }
 
+function renderMatrix(node: MatrixNode, key: string): React.ReactNode {
+  const isSquare = node.environment === "bmatrix" || !node.environment;
+  const isCurved = node.environment === "pmatrix";
+  const isBar = node.environment === "vmatrix" || node.environment === "Vmatrix";
+  const isCurly = node.environment === "Bmatrix";
+
+  return (
+    <span
+      key={key}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        verticalAlign: "middle",
+        margin: "0 4px",
+      }}
+    >
+      {/* Left delimiter */}
+      {isSquare && (
+        <span
+          style={{
+            display: "inline-block",
+            borderLeft: "2px solid currentColor",
+            borderTop: "2px solid currentColor",
+            borderBottom: "2px solid currentColor",
+            width: "5px",
+            alignSelf: "stretch",
+            marginRight: "4px",
+            borderRadius: "1px 0 0 1px",
+          }}
+        />
+      )}
+      {isCurved && (
+        <span
+          style={{
+            display: "inline-block",
+            borderLeft: "2px solid currentColor",
+            borderTop: "1px solid transparent",
+            borderBottom: "1px solid transparent",
+            width: "6px",
+            alignSelf: "stretch",
+            marginRight: "4px",
+            borderRadius: "50% 0 0 50%",
+          }}
+        />
+      )}
+      {isBar && (
+        <span
+          style={{
+            display: "inline-block",
+            borderLeft: "2px solid currentColor",
+            width: "2px",
+            alignSelf: "stretch",
+            marginRight: "4px",
+          }}
+        />
+      )}
+      {isCurly && (
+        <span style={{ fontSize: "1.4em", alignSelf: "center", marginRight: "3px", lineHeight: 1 }}>
+          {"{"}
+        </span>
+      )}
+
+      {/* Grid of cells */}
+      <table
+        style={{
+          borderCollapse: "separate",
+          borderSpacing: "12px 4px",
+          textAlign: "center",
+          fontFamily: NUM_FONT.fontFamily,
+          fontStyle: "normal",
+        }}
+      >
+        <tbody>
+          {node.rows.map((row, r) => (
+            <tr key={r}>
+              {row.map((cell, c) => (
+                <td key={c} style={{ padding: "1px 4px", whiteSpace: "nowrap" }}>
+                  {cell.length > 0 ? (
+                    renderNodes(cell, `${key}_r${r}_c${c}`)
+                  ) : (
+                    <span style={{ display: "inline-block", width: "12px" }} />
+                  )}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Right delimiter */}
+      {isSquare && (
+        <span
+          style={{
+            display: "inline-block",
+            borderRight: "2px solid currentColor",
+            borderTop: "2px solid currentColor",
+            borderBottom: "2px solid currentColor",
+            width: "5px",
+            alignSelf: "stretch",
+            marginLeft: "4px",
+            borderRadius: "0 1px 1px 0",
+          }}
+        />
+      )}
+      {isCurved && (
+        <span
+          style={{
+            display: "inline-block",
+            borderRight: "2px solid currentColor",
+            borderTop: "1px solid transparent",
+            borderBottom: "1px solid transparent",
+            width: "6px",
+            alignSelf: "stretch",
+            marginLeft: "4px",
+            borderRadius: "0 50% 50% 0",
+          }}
+        />
+      )}
+      {isBar && (
+        <span
+          style={{
+            display: "inline-block",
+            borderRight: "2px solid currentColor",
+            width: "2px",
+            alignSelf: "stretch",
+            marginLeft: "4px",
+          }}
+        />
+      )}
+      {isCurly && (
+        <span style={{ fontSize: "1.4em", alignSelf: "center", marginLeft: "3px", lineHeight: 1 }}>
+          {"}"}
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export interface DigitalMathProps {
@@ -381,6 +522,39 @@ function renderNodeToHtml(node: MathNode): string {
       const bo = node as BigOpNode;
       const char = BIG_OP_CHARS[bo.operator] ?? "∑";
       return `<span style="font-size:1.2em;vertical-align:middle;margin:0 2px;">${escapeHtml(char)}</span>`;
+    }
+    case "matrix": {
+      const mn = node as MatrixNode;
+      const isSquare = mn.environment === "bmatrix" || !mn.environment;
+      const isCurved = mn.environment === "pmatrix";
+      const isBar = mn.environment === "vmatrix" || mn.environment === "Vmatrix";
+      const isCurly = mn.environment === "Bmatrix";
+
+      let leftDelim = "";
+      let rightDelim = "";
+      if (isSquare) {
+        leftDelim = `<span style="display:inline-block;border-left:2px solid currentColor;border-top:2px solid currentColor;border-bottom:2px solid currentColor;width:5px;align-self:stretch;margin-right:4px;border-radius:1px 0 0 1px;"></span>`;
+        rightDelim = `<span style="display:inline-block;border-right:2px solid currentColor;border-top:2px solid currentColor;border-bottom:2px solid currentColor;width:5px;align-self:stretch;margin-left:4px;border-radius:0 1px 1px 0;"></span>`;
+      } else if (isCurved) {
+        leftDelim = `<span style="display:inline-block;border-left:2px solid currentColor;border-top:1px solid transparent;border-bottom:1px solid transparent;width:6px;align-self:stretch;margin-right:4px;border-radius:50% 0 0 50%;"></span>`;
+        rightDelim = `<span style="display:inline-block;border-right:2px solid currentColor;border-top:1px solid transparent;border-bottom:1px solid transparent;width:6px;align-self:stretch;margin-left:4px;border-radius:0 50% 50% 0;"></span>`;
+      } else if (isBar) {
+        leftDelim = `<span style="display:inline-block;border-left:2px solid currentColor;width:2px;align-self:stretch;margin-right:4px;"></span>`;
+        rightDelim = `<span style="display:inline-block;border-right:2px solid currentColor;width:2px;align-self:stretch;margin-left:4px;"></span>`;
+      } else if (isCurly) {
+        leftDelim = `<span style="font-size:1.4em;align-self:center;margin-right:3px;line-height:1;">{</span>`;
+        rightDelim = `<span style="font-size:1.4em;align-self:center;margin-left:3px;line-height:1;">}</span>`;
+      }
+
+      const rowsHtml = mn.rows.map((row) => {
+        const cellsHtml = row.map((cell) => {
+          const content = cell.length > 0 ? cell.map(renderNodeToHtml).join("") : `<span style="display:inline-block;width:12px;"></span>`;
+          return `<td style="padding:1px 4px;white-space:nowrap;">${content}</td>`;
+        }).join("");
+        return `<tr>${cellsHtml}</tr>`;
+      }).join("");
+
+      return `<span style="display:inline-flex;align-items:center;vertical-align:middle;margin:0 4px;">${leftDelim}<table style="border-collapse:separate;border-spacing:12px 4px;text-align:center;font-family:'STIX Two Math','Latin Modern Math','Cambria Math','Times New Roman',serif;font-style:normal;"><tbody>${rowsHtml}</tbody></table>${rightDelim}</span>`;
     }
     case "space":
       return `<span style="display:inline-block;width:${node.widthEm}em;"></span>`;

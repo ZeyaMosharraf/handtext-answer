@@ -26,6 +26,7 @@ import type {
   GroupedNode,
   BigOpNode,
   SpaceNode,
+  MatrixNode,
   MathLayoutBox,
 } from "./types";
 import { drawGlyph, hasGlyph, GLYPH_MAP } from "./glyphs";
@@ -170,6 +171,7 @@ function layoutNode(
     case "root":      return layoutRoot(node, ctx, settings, baseSize, scale);
     case "function":  return layoutFunction(node, ctx, settings, baseSize, scale);
     case "grouped":   return layoutGrouped(node, ctx, settings, baseSize, scale);
+    case "matrix":    return layoutMatrix(node as MatrixNode, ctx, settings, baseSize, scale);
     case "bigOp":     return layoutBigOp(node, ctx, settings, baseSize, scale);
     case "space":     return layoutSpace(node, baseSize, scale);
     default:
@@ -668,10 +670,177 @@ function drawDelimiter(
   } else if (delim === "|") {
     ctx.moveTo(cx + j(), top + j());
     ctx.lineTo(cx + j(), bottom + j());
+  } else if (delim === "\\|" || delim === "||") {
+    ctx.moveTo(cx - size * 0.08 + j(), top + j());
+    ctx.lineTo(cx - size * 0.08 + j(), bottom + j());
+    ctx.moveTo(cx + size * 0.08 + j(), top + j());
+    ctx.lineTo(cx + size * 0.08 + j(), bottom + j());
   }
 
   ctx.stroke();
   ctx.restore();
+}
+
+// ─── Matrix Layout ────────────────────────────────────────────────────────────
+
+function layoutMatrix(
+  node: MatrixNode,
+  ctx: CanvasRenderingContext2D,
+  settings: HandwritingSettings,
+  baseSize: number,
+  scale: number,
+): MathLayoutBox {
+  const size = baseSize * scale;
+  const numRows = Math.max(1, node.rows.length);
+  const numCols = Math.max(1, ...node.rows.map((r) => r.length));
+
+  const cellScale = scale * 0.95;
+  const cellBoxes: MathLayoutBox[][] = [];
+
+  for (let r = 0; r < numRows; r++) {
+    cellBoxes[r] = [];
+    const row = node.rows[r] ?? [];
+    for (let c = 0; c < numCols; c++) {
+      const cellNodes = row[c] ?? [];
+      if (cellNodes.length === 0) {
+        cellBoxes[r]![c] = makeBox("empty", size * 0.4, size * 0.4, size * 0.1, () => {});
+      } else {
+        cellBoxes[r]![c] = layoutSequence(cellNodes, ctx, settings, baseSize, cellScale);
+      }
+    }
+  }
+
+  // 1. Column widths: maximum cell width in each column
+  const colWidths: number[] = new Array(numCols).fill(0);
+  for (let c = 0; c < numCols; c++) {
+    let maxW = 0;
+    for (let r = 0; r < numRows; r++) {
+      const w = cellBoxes[r]?.[c]?.width ?? 0;
+      if (w > maxW) maxW = w;
+    }
+    colWidths[c] = Math.max(maxW, size * 0.4);
+  }
+
+  // 2. Row ascents and descents
+  const rowAscents: number[] = new Array(numRows).fill(0);
+  const rowDescents: number[] = new Array(numRows).fill(0);
+  for (let r = 0; r < numRows; r++) {
+    let maxAscent = size * 0.45;
+    let maxDescent = size * 0.20;
+    for (let c = 0; c < numCols; c++) {
+      const box = cellBoxes[r]?.[c];
+      if (box) {
+        if (box.ascent > maxAscent) maxAscent = box.ascent;
+        if (box.descent > maxDescent) maxDescent = box.descent;
+      }
+    }
+    rowAscents[r] = maxAscent;
+    rowDescents[r] = maxDescent;
+  }
+
+  // 3. Spacing: readable column separation and row separation
+  const colSpacing = size * 0.75;
+  const rowGap = size * 0.38;
+
+  const totalGridW = colWidths.reduce((sum, w) => sum + w, 0) + (numCols - 1) * colSpacing;
+  const rowHeights = rowAscents.map((asc, r) => asc + rowDescents[r]!);
+  const totalGridH = rowHeights.reduce((sum, h) => sum + h, 0) + (numRows - 1) * rowGap;
+
+  let openDelim = "";
+  let closeDelim = "";
+  switch (node.environment) {
+    case "pmatrix":
+      openDelim = "(";
+      closeDelim = ")";
+      break;
+    case "bmatrix":
+      openDelim = "[";
+      closeDelim = "]";
+      break;
+    case "Bmatrix":
+      openDelim = "{";
+      closeDelim = "}";
+      break;
+    case "vmatrix":
+      openDelim = "|";
+      closeDelim = "|";
+      break;
+    case "Vmatrix":
+      openDelim = "\\|";
+      closeDelim = "\\|";
+      break;
+    case "matrix":
+    default:
+      openDelim = "";
+      closeDelim = "";
+      break;
+  }
+
+  const hasDelim = Boolean(openDelim || closeDelim);
+  const delimW = hasDelim ? size * 0.38 : 0;
+  const hPad = hasDelim ? size * 0.20 : 0;
+  const totalW = delimW + hPad + totalGridW + hPad + delimW;
+
+  // Symmetrically balance delimiters around the math axis (-0.28 * size)
+  const axisY = -(size * 0.28);
+  const vPad = size * 0.12;
+  const halfH = totalGridH / 2 + vPad;
+  const totalAscent = halfH - axisY;
+  const totalDescent = halfH + axisY;
+
+  const gridTopY = axisY - totalGridH / 2;
+
+  // Column X offsets
+  const colXOffsets: number[] = [];
+  let currX = delimW + hPad;
+  for (let c = 0; c < numCols; c++) {
+    colXOffsets[c] = currX;
+    currX += colWidths[c]! + colSpacing;
+  }
+
+  // Row baseline Y offsets
+  const rowBaselineOffsets: number[] = [];
+  let currRowTop = gridTopY;
+  for (let r = 0; r < numRows; r++) {
+    rowBaselineOffsets[r] = currRowTop + rowAscents[r]!;
+    currRowTop += rowHeights[r]! + rowGap;
+  }
+
+  const children: Array<{ box: MathLayoutBox; dx: number; dy: number }> = [];
+  for (let r = 0; r < numRows; r++) {
+    for (let c = 0; c < numCols; c++) {
+      const box = cellBoxes[r]?.[c];
+      if (box) {
+        const cellX = colXOffsets[c]! + (colWidths[c]! - box.width) / 2;
+        const cellY = rowBaselineOffsets[r]!;
+        children.push({ box, dx: cellX, dy: cellY });
+      }
+    }
+  }
+
+  return makeBox(
+    "matrix",
+    totalW,
+    totalAscent,
+    totalDescent,
+    (ctx, x, y, settings, random, ink) => {
+      const sw = Math.max(1.0, settings.penWidth * 0.85);
+
+      if (openDelim) {
+        drawDelimiter(ctx, x, y, totalAscent, totalDescent, openDelim, size, settings, random, ink, sw);
+      }
+
+      for (const child of children) {
+        child.box.draw(ctx, x + child.dx, y + child.dy, settings, random, ink);
+      }
+
+      if (closeDelim) {
+        const rightDelimX = x + delimW + hPad + totalGridW + hPad;
+        drawDelimiter(ctx, rightDelimX, y, totalAscent, totalDescent, closeDelim, size, settings, random, ink, sw);
+      }
+    },
+    children,
+  );
 }
 
 // ─── Big Operators ────────────────────────────────────────────────────────────

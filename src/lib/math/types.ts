@@ -99,6 +99,23 @@ export interface SpaceNode {
   widthEm: number;
 }
 
+/** Supported matrix environments and delimiter styles */
+export type MatrixEnvironment =
+  | "matrix"   // no delimiters
+  | "pmatrix"  // parentheses ( )
+  | "bmatrix"  // square brackets [ ]
+  | "Bmatrix"  // curly braces { }
+  | "vmatrix"  // single vertical bars | |
+  | "Vmatrix"; // double vertical bars || ||
+
+/** A 2D matrix of mathematical expressions: \begin{bmatrix} ... \end{bmatrix} */
+export interface MatrixNode {
+  type: "matrix";
+  environment: MatrixEnvironment;
+  /** 2D grid: rows[rowIndex][colIndex] = MathNode[] */
+  rows: MathNode[][][];
+}
+
 export type MathNode =
   | NumberNode
   | IdentifierNode
@@ -110,7 +127,8 @@ export type MathNode =
   | FunctionNode
   | GroupedNode
   | BigOpNode
-  | SpaceNode;
+  | SpaceNode
+  | MatrixNode;
 
 // ─── Math Layout Box ─────────────────────────────────────────────────────────
 
