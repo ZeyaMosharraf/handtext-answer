@@ -34,8 +34,8 @@ import { writeSegments, inkLine, type PenOptions } from "../handwriting/pen";
 // ─── Minimum scale clamp ──────────────────────────────────────────────────────
 
 const MIN_SCALE = 0.60;
-const FRACTION_SCALE = 0.80;
-const SCRIPT_SCALE = 0.70;
+const FRACTION_SCALE = 0.72;
+const SCRIPT_SCALE = 0.65;
 const INDEX_SCALE = 0.55;
 
 function clampedScale(scale: number, base: number): number {
@@ -264,20 +264,24 @@ function layoutSymbol(
     // Measure by running a dry-run on an offscreen canvas
     // For now use heuristic widths that match glyph geometry
     const glyphWidths: Record<string, number> = {
-      alpha: 0.64, beta: 0.56, theta: 0.56, lambda: 0.58, pi: 0.60,
-      mu: 0.58, sigma: 0.62, omega: 0.62, Sigma: 0.60, Delta: 0.62,
-      sum: 0.60, infty: 0.66, int: 0.35, oint: 0.35,
-      leq: 0.48, geq: 0.48, neq: 0.52, approx: 0.52,
-      pm: 0.48, partial: 0.44,
+      alpha: 0.64, "α": 0.64, beta: 0.56, "β": 0.56, theta: 0.56, "θ": 0.56,
+      lambda: 0.58, "λ": 0.58, pi: 0.60, "π": 0.60, mu: 0.58, "μ": 0.58,
+      sigma: 0.62, "σ": 0.62, omega: 0.62, "ω": 0.62, Sigma: 0.60, "Σ": 0.60,
+      Delta: 0.62, "Δ": 0.62, sum: 0.60, infty: 0.66, "∞": 0.66,
+      int: 0.35, "∫": 0.35, oint: 0.35,
+      leq: 0.48, "≤": 0.48, geq: 0.48, "≥": 0.48, neq: 0.52, "≠": 0.52,
+      approx: 0.52, "≈": 0.52, pm: 0.48, "±": 0.48, partial: 0.44, "∂": 0.44,
+      sqrt: 0.40, "√": 0.40,
     };
     const relW = glyphWidths[key] ?? 0.60;
     const w = size * relW;
     const glyphAscents: Record<string, number> = {
-      Sigma: 0.72, Delta: 0.70, sum: 0.80, int: 0.95, oint: 0.95,
-      infty: 0.40, beta: 0.82, partial: 0.70,
+      Sigma: 0.72, "Σ": 0.72, Delta: 0.70, "Δ": 0.70, sum: 0.80,
+      int: 0.95, "∫": 0.95, oint: 0.95, infty: 0.40, "∞": 0.40,
+      beta: 0.82, "β": 0.82, partial: 0.70, "∂": 0.70,
     };
     const glyphDescents: Record<string, number> = {
-      beta: 0.24, mu: 0.22, int: 0.12, oint: 0.12,
+      beta: 0.24, "β": 0.24, mu: 0.22, "μ": 0.22, int: 0.12, "∫": 0.12, oint: 0.12,
     };
     const ascent = size * (glyphAscents[key] ?? 0.52);
     const descent = size * (glyphDescents[key] ?? 0);
@@ -329,12 +333,13 @@ function layoutFraction(
   const numBox = layoutSequence(node.numerator, ctx, settings, baseSize, childScale);
   const denBox = layoutSequence(node.denominator, ctx, settings, baseSize, childScale);
 
-  const padX = baseSize * scale * 0.1;
+  // Handwritten fraction bar with confident horizontal reach
+  const padX = Math.max(8, baseSize * scale * 0.20);
   const barW = Math.max(numBox.width, denBox.width) + padX * 2;
-  const gapY = baseSize * scale * 0.12;
-  // Math axis: ~0.28 × size above baseline
-  const axisY = -(baseSize * scale * 0.28);
-  // Fraction bar y coordinate
+  // Compact, cohesive gap so numerator and denominator belong to the same composition
+  const gapY = Math.max(2, baseSize * scale * 0.08);
+  // Math axis: ~0.30 × size above baseline
+  const axisY = -(baseSize * scale * 0.30);
   const barY = axisY;
 
   const numBaselineY = barY - gapY - numBox.descent;
@@ -353,8 +358,8 @@ function layoutFraction(
     (ctx, x, y, settings, random, ink) => {
       // Numerator
       numBox.draw(ctx, x + numOffsetX, y + numBaselineY, settings, random, ink);
-      // Fraction bar
-      const barWidth = Math.max(0.7, settings.penWidth * 0.65);
+      // Fraction bar: confident handwritten stroke matching pen width
+      const barWidth = Math.max(1.0, settings.penWidth * 0.85);
       inkLine(ctx, x, y + barY, x + barW, y + barY, random, ink, barWidth);
       // Denominator
       denBox.draw(ctx, x + denOffsetX, y + denBaselineY, settings, random, ink);
@@ -380,9 +385,11 @@ function layoutSupSub(
   const supBox = node.sup ? layoutSequence(node.sup, ctx, settings, baseSize, scriptScale) : null;
   const subBox = node.sub ? layoutSequence(node.sub, ctx, settings, baseSize, scriptScale) : null;
 
-  const kern = baseSize * scale * 0.06;
-  const supOffsetY = -(baseBox.ascent * 0.65);
-  const subOffsetY = baseBox.descent + baseSize * scriptScale * 0.2;
+  // Natural handwritten kerning: clear italic slant of base without floating away
+  const kern = baseBox.type === "identifier" ? baseSize * scale * 0.03 : baseSize * scale * 0.01;
+  // Natural superscript elevation: baseline nestled near waistline of base letter (~0.38 of base ascent)
+  const supOffsetY = -(baseBox.ascent * 0.38);
+  const subOffsetY = Math.max(baseBox.descent * 0.6, baseBox.ascent * 0.28);
 
   const scriptWidth = Math.max(supBox?.width ?? 0, subBox?.width ?? 0);
   const totalWidth = baseBox.width + kern + scriptWidth;
@@ -393,6 +400,10 @@ function layoutSupSub(
   const descent = subBox
     ? Math.max(baseBox.descent, subOffsetY + subBox.descent)
     : baseBox.descent;
+
+  const children: MathLayoutBox["children"] = [{ box: baseBox, dx: 0, dy: 0 }];
+  if (supBox) children.push({ box: supBox, dx: baseBox.width + kern, dy: supOffsetY });
+  if (subBox) children.push({ box: subBox, dx: baseBox.width + kern, dy: subOffsetY });
 
   return makeBox(
     "supsub",
@@ -405,6 +416,7 @@ function layoutSupSub(
       if (supBox) supBox.draw(ctx, scriptX, y + supOffsetY, settings, random, ink);
       if (subBox) subBox.draw(ctx, scriptX, y + subOffsetY, settings, random, ink);
     },
+    children,
   );
 }
 
@@ -452,7 +464,7 @@ function layoutRoot(
     boxAscent,
     boxDescent,
     (ctx, x, y, settings, random, ink) => {
-      const sw = Math.max(0.8, settings.penWidth * 0.7);
+      const sw = Math.max(1.0, settings.penWidth * 0.85);
 
       // Draw index (n-th root)
       if (indexBox) {
@@ -462,14 +474,14 @@ function layoutRoot(
       // Draw radical symbol: tick → plunge → ascent → vinculum
       ctx.save();
       ctx.strokeStyle = ink;
-      ctx.lineWidth = sw + (Math.random() - 0.5) * 0.3;
+      ctx.lineWidth = sw + (random() - 0.5) * 0.2;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.globalAlpha = Math.min(1, settings.inkIntensity * 0.95);
       ctx.beginPath();
 
       const rx = x + radicalX;
-      const j = () => (Math.random() - 0.5) * 1.2;
+      const j = () => (random() - 0.5) * 1.0;
 
       // Short tick at bottom of check mark
       ctx.moveTo(rx + j(), y - size * 0.1 + j());
@@ -539,8 +551,18 @@ function layoutGrouped(
   const size = baseSize * scale;
   const delimW = node.open ? size * 0.22 : 0;
   const totalW = bodyBox.width + delimW * 2;
-  const totalAscent = bodyBox.ascent;
-  const totalDescent = bodyBox.descent;
+
+  // Symmetrically balance delimiters around the math axis (-0.28 * size above baseline)
+  const axisY = -(size * 0.28);
+  const pad = size * 0.08;
+  const maxAxisDist = Math.max(
+    bodyBox.ascent + axisY,
+    bodyBox.descent - axisY,
+    size * 0.45,
+  ) + pad;
+
+  const totalAscent = maxAxisDist - axisY;
+  const totalDescent = maxAxisDist + axisY;
   const open = node.open;
   const close = node.close;
 
@@ -550,7 +572,7 @@ function layoutGrouped(
     totalAscent,
     totalDescent,
     (ctx, x, y, settings, random, ink) => {
-      const sw = Math.max(0.8, settings.penWidth * 0.65);
+      const sw = Math.max(1.0, settings.penWidth * 0.85);
 
       if (open) {
         drawDelimiter(ctx, x, y, totalAscent, totalDescent, open, size, settings, random, ink, sw);
@@ -587,13 +609,19 @@ function drawDelimiter(
 ) {
   const top = baselineY - ascent;
   const bottom = baselineY + descent;
-  const cx = x + size * 0.1;
+  const h = bottom - top;
+  const y1 = top + h * 0.28;
+  const y2 = bottom - h * 0.28;
+  const mid = (top + bottom) / 2;
+  const cx = x + size * 0.11;
+  const bowW = Math.max(size * 0.12, Math.min(size * 0.20, h * 0.16));
 
   ctx.save();
   ctx.strokeStyle = ink;
   ctx.lineWidth = sw;
   ctx.lineCap = "round";
-  ctx.globalAlpha = Math.min(1, settings.inkIntensity * 0.92);
+  ctx.lineJoin = "round";
+  ctx.globalAlpha = Math.min(1, settings.inkIntensity * 0.95);
   ctx.beginPath();
 
   const j = () => (random() - 0.5) * 1.0;
@@ -601,38 +629,41 @@ function drawDelimiter(
   if (delim === "(" || delim === "[" || delim === "{") {
     // Left-facing bracket: straight for [, curved for (, angular for {
     if (delim === "(") {
-      ctx.moveTo(cx + size * 0.1 + j(), top + j());
-      ctx.bezierCurveTo(cx - size * 0.05, (top + bottom) * 0.35, cx - size * 0.05, (top + bottom) * 0.65, cx + size * 0.1 + j(), bottom + j());
+      ctx.moveTo(cx + bowW * 0.35 + j(), top + j());
+      ctx.bezierCurveTo(
+        cx - bowW * 0.75 + j(), y1,
+        cx - bowW * 0.75 + j(), y2,
+        cx + bowW * 0.35 + j(), bottom + j()
+      );
     } else if (delim === "[") {
-      ctx.moveTo(cx + j(), top + j());
-      ctx.lineTo(cx - size * 0.08 + j(), top + j());
-      ctx.moveTo(cx - size * 0.08 + j(), top + j());
-      ctx.lineTo(cx - size * 0.08 + j(), bottom + j());
-      ctx.moveTo(cx - size * 0.08 + j(), bottom + j());
-      ctx.lineTo(cx + j(), bottom + j());
+      ctx.moveTo(cx + bowW * 0.3 + j(), top + j());
+      ctx.lineTo(cx - bowW * 0.3 + j(), top + j());
+      ctx.lineTo(cx - bowW * 0.3 + j(), bottom + j());
+      ctx.lineTo(cx + bowW * 0.3 + j(), bottom + j());
     } else {
-      // Curly { — top half
-      const mid = (top + bottom) / 2;
-      ctx.moveTo(cx + size * 0.08, top + j());
-      ctx.bezierCurveTo(cx - size * 0.04, top + j(), cx - size * 0.12, mid - size * 0.06, cx - size * 0.14, mid + j());
-      ctx.bezierCurveTo(cx - size * 0.12, mid + size * 0.06, cx - size * 0.04, bottom + j(), cx + size * 0.08, bottom + j());
+      // Curly {
+      ctx.moveTo(cx + bowW * 0.4, top + j());
+      ctx.bezierCurveTo(cx - bowW * 0.2, top + j(), cx - bowW * 0.8, mid - size * 0.1, cx - bowW * 0.85, mid + j());
+      ctx.bezierCurveTo(cx - bowW * 0.8, mid + size * 0.1, cx - bowW * 0.2, bottom + j(), cx + bowW * 0.4, bottom + j());
     }
   } else if (delim === ")" || delim === "]" || delim === "}") {
     if (delim === ")") {
-      ctx.moveTo(cx - size * 0.1 + j(), top + j());
-      ctx.bezierCurveTo(cx + size * 0.05, (top + bottom) * 0.35, cx + size * 0.05, (top + bottom) * 0.65, cx - size * 0.1 + j(), bottom + j());
+      ctx.moveTo(cx - bowW * 0.35 + j(), top + j());
+      ctx.bezierCurveTo(
+        cx + bowW * 0.75 + j(), y1,
+        cx + bowW * 0.75 + j(), y2,
+        cx - bowW * 0.35 + j(), bottom + j()
+      );
     } else if (delim === "]") {
-      ctx.moveTo(cx + size * 0.08 + j(), top + j());
-      ctx.lineTo(cx + size * 0.16 + j(), top + j());
-      ctx.moveTo(cx + size * 0.16 + j(), top + j());
-      ctx.lineTo(cx + size * 0.16 + j(), bottom + j());
-      ctx.moveTo(cx + size * 0.16 + j(), bottom + j());
-      ctx.lineTo(cx + size * 0.08 + j(), bottom + j());
+      ctx.moveTo(cx - bowW * 0.3 + j(), top + j());
+      ctx.lineTo(cx + bowW * 0.3 + j(), top + j());
+      ctx.lineTo(cx + bowW * 0.3 + j(), bottom + j());
+      ctx.lineTo(cx - bowW * 0.3 + j(), bottom + j());
     } else {
-      const mid = (top + bottom) / 2;
-      ctx.moveTo(cx - size * 0.08, top + j());
-      ctx.bezierCurveTo(cx + size * 0.04, top + j(), cx + size * 0.12, mid - size * 0.06, cx + size * 0.14, mid + j());
-      ctx.bezierCurveTo(cx + size * 0.12, mid + size * 0.06, cx + size * 0.04, bottom + j(), cx - size * 0.08, bottom + j());
+      // Curly }
+      ctx.moveTo(cx - bowW * 0.4, top + j());
+      ctx.bezierCurveTo(cx + bowW * 0.2, top + j(), cx + bowW * 0.8, mid - size * 0.1, cx + bowW * 0.85, mid + j());
+      ctx.bezierCurveTo(cx + bowW * 0.8, mid + size * 0.1, cx + bowW * 0.2, bottom + j(), cx - bowW * 0.4, bottom + j());
     }
   } else if (delim === "|") {
     ctx.moveTo(cx + j(), top + j());
@@ -733,5 +764,7 @@ export function computeLineUnits(
   padding = 0,
 ): number {
   const totalH = box.ascent + box.descent + 2 * padding;
-  return Math.max(1, Math.ceil(totalH / rulingSpacing));
+  // Expressions whose height fits within a normal ruled line with standard ascender/descender
+  // clearance (within 105% of rulingSpacing) occupy 1 lineUnit.
+  return Math.max(1, Math.ceil((totalH - rulingSpacing * 0.05) / rulingSpacing));
 }

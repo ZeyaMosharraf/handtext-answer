@@ -45,8 +45,10 @@ export interface RichContentEditorHandle {
   getTableInfo: () => TableSelectionInfo | null;
   /** Insert a new math block at the current cursor position */
   insertMathBlock: (latex: string) => void;
-  /** Update the latex of the currently focused math-block element */
-  updateMathBlock: (latex: string) => void;
+  /** Update the latex of the specified or focused math-block element */
+  updateMathBlock: (latex: string, targetEl?: HTMLElement | null) => void;
+  /** Clear any active math element reference */
+  clearActiveMathElement: () => void;
   /** Return the latex of the math-block the cursor is currently in/adjacent to */
   getMathInfo: () => { latex: string } | null;
   focus: () => void;
@@ -59,6 +61,7 @@ interface RichContentEditorProps {
   placeholder?: string;
   className?: string;
   onFormatChange?: (state: FormatState) => void;
+  onMathBlockClick?: (latex: string, element: HTMLElement) => void;
 }
 
 function rgbToHex(rgbStr: string): string | null {
@@ -71,10 +74,11 @@ function rgbToHex(rgbStr: string): string | null {
 }
 
 export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContentEditorProps>(
-  ({ value, onChange, placeholder, className, onFormatChange }, ref) => {
+  ({ value, onChange, placeholder, className, onFormatChange, onMathBlockClick }, ref) => {
     const editorRef = useRef<HTMLDivElement>(null);
     const lastValueRef = useRef<string>("");
     const isInternalChangeRef = useRef(false);
+    const savedRangeRef = useRef<Range | null>(null);
 
     const [formatState, setFormatState] = useState<FormatState>({
       bold: false,
@@ -174,37 +178,21 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
 
       const tableInfo = getTableSelectionInfo(editorRef.current);
 
-      // Detect math block adjacency — check sel.anchorNode's nearest ancestor or sibling
+      // Detect math block ancestry — only when selection is explicitly inside a math-block
       let mathInfo: { latex: string; element: HTMLElement } | undefined = undefined;
       if (sel && sel.rangeCount > 0) {
         let checkNode: Node | null = sel.anchorNode;
-        // Walk up to find a math-block or check siblings
         while (checkNode && checkNode !== editorRef.current) {
           if (checkNode.nodeType === 1) {
             const el = checkNode as HTMLElement;
             if (el.classList.contains("math-block")) {
               const latex = el.getAttribute("data-latex") ?? "";
-              if (latex) { mathInfo = { latex, element: el }; currentMathElementRef.current = el; break; }
+              if (latex) { mathInfo = { latex, element: el }; break; }
             }
           }
           checkNode = checkNode.parentNode;
         }
-        // Also check prev/next siblings of anchor
-        if (!mathInfo && sel.anchorNode) {
-          const prev = sel.anchorNode.previousSibling;
-          const next = sel.anchorNode.nextSibling;
-          for (const sibling of [prev, next]) {
-            if (sibling?.nodeType === 1) {
-              const sibEl = sibling as HTMLElement;
-              if (sibEl.classList.contains("math-block")) {
-                const latex = sibEl.getAttribute("data-latex") ?? "";
-                if (latex) { mathInfo = { latex, element: sibEl }; currentMathElementRef.current = sibEl; break; }
-              }
-            }
-          }
-        }
       }
-      if (!mathInfo) currentMathElementRef.current = null;
 
       return {
         bold,
@@ -227,12 +215,21 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       onFormatChange?.(state);
     }, [queryActiveFormats, onFormatChange]);
 
-    // Selection change tracking
+    // Selection change tracking & range preservation
+    const saveSelection = useCallback(() => {
+      if (typeof window === "undefined" || !editorRef.current) return;
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && editorRef.current.contains(sel.anchorNode)) {
+        savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+      }
+    }, []);
+
     useEffect(() => {
       const handleSelectionChange = () => {
         if (!editorRef.current) return;
         const sel = window.getSelection();
         if (sel && sel.anchorNode && editorRef.current.contains(sel.anchorNode)) {
+          savedRangeRef.current = sel.getRangeAt(0).cloneRange();
           updateFormatState();
         }
       };
@@ -520,49 +517,181 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
 
     const currentMathElementRef = useRef<HTMLElement | null>(null);
 
-    const insertMathBlock = useCallback((latex: string) => {
-      const el = editorRef.current;
-      if (!el) return;
-      el.focus();
+    const insertMathBlock = useCallback(
+      (latex: string) => {
+        const el = editorRef.current;
+        if (!el) return;
+        el.focus();
 
-      // Build the math-block DOM node
-      const mathDiv = document.createElement("div");
-      mathDiv.className = "math-block";
-      mathDiv.setAttribute("data-latex", latex);
-      mathDiv.setAttribute("contenteditable", "false");
-      mathDiv.style.cssText =
-        "display:inline-flex;align-items:center;gap:6px;padding:4px 10px;" +
-        "margin:2px 0;border-radius:6px;background:rgba(99,102,241,0.08);" +
-        "border:1px solid rgba(99,102,241,0.25);cursor:pointer;user-select:none;" +
-        "font-family:monospace;font-size:0.82em;color:#4338ca;white-space:nowrap;";
-      mathDiv.innerHTML = `<span style="opacity:0.7;font-size:1.1em;">∑</span><span>${latex.length > 60 ? latex.slice(0, 57) + "…" : latex}</span>`;
+        // Build the math-block DOM node
+        const mathDiv = document.createElement("div");
+        mathDiv.className = "math-block";
+        mathDiv.setAttribute("data-latex", latex);
+        mathDiv.setAttribute("contenteditable", "false");
+        mathDiv.style.cssText =
+          "display:inline-flex;align-items:center;gap:6px;padding:4px 10px;" +
+          "margin:4px 0;border-radius:6px;background:rgba(99,102,241,0.08);" +
+          "border:1px solid rgba(99,102,241,0.25);cursor:pointer;user-select:none;" +
+          "font-family:monospace;font-size:0.82em;color:#4338ca;white-space:nowrap;";
+        const previewText = latex.length > 60 ? latex.slice(0, 57) + "…" : latex;
+        mathDiv.innerHTML = `<span style="opacity:0.7;font-size:1.1em;">∑</span><span>${previewText}</span>`;
 
-      // Insert at caret or at end
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0) {
-        const range = sel.getRangeAt(0);
-        range.deleteContents();
-        range.insertNode(mathDiv);
-        // Move cursor after the inserted node
-        range.setStartAfter(mathDiv);
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
-      } else {
-        el.appendChild(mathDiv);
-      }
+        const createTrailingParagraph = () => {
+          const p = document.createElement("p");
+          p.innerHTML = "<br>";
+          return p;
+        };
 
-      triggerChange();
+        const setCaretInParagraph = (p: HTMLElement) => {
+          const sel = window.getSelection();
+          if (sel) {
+            const range = document.createRange();
+            range.setStart(p, 0);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            savedRangeRef.current = range.cloneRange();
+          }
+        };
+
+        let inserted = false;
+
+        const getEnclosingMathBlock = (node: Node | null): HTMLElement | null => {
+          let curr: Node | null = node;
+          while (curr && curr !== el) {
+            if (curr.nodeType === 1 && (curr as HTMLElement).classList.contains("math-block")) {
+              return curr as HTMLElement;
+            }
+            curr = curr.parentNode;
+          }
+          return null;
+        };
+
+        const insertAfterElement = (target: HTMLElement) => {
+          if (target.parentNode) {
+            const trailingP = createTrailingParagraph();
+            if (target.nextSibling) {
+              target.parentNode.insertBefore(mathDiv, target.nextSibling);
+              target.parentNode.insertBefore(trailingP, mathDiv.nextSibling);
+            } else {
+              target.parentNode.appendChild(mathDiv);
+              target.parentNode.appendChild(trailingP);
+            }
+            setCaretInParagraph(trailingP);
+            return true;
+          }
+          return false;
+        };
+
+        // 1. Try saved selection first (captured before focus went to modal)
+        if (savedRangeRef.current && el.contains(savedRangeRef.current.commonAncestorContainer)) {
+          try {
+            const range = savedRangeRef.current;
+            const enclosing = getEnclosingMathBlock(range.commonAncestorContainer)
+              ?? getEnclosingMathBlock(range.startContainer);
+            if (enclosing) {
+              inserted = insertAfterElement(enclosing);
+            } else {
+              // Check if range is inside an empty paragraph or container
+              let targetNode = range.startContainer;
+              if (targetNode.nodeType === 3) targetNode = targetNode.parentNode as Node;
+              const parentBlock = (targetNode as HTMLElement)?.closest?.("p, div");
+              if (
+                parentBlock &&
+                parentBlock !== el &&
+                (!parentBlock.textContent?.trim() || parentBlock.innerHTML === "<br>")
+              ) {
+                // Cleanly replace empty paragraph
+                const trailingP = createTrailingParagraph();
+                parentBlock.replaceWith(mathDiv);
+                if (mathDiv.nextSibling) {
+                  mathDiv.parentNode?.insertBefore(trailingP, mathDiv.nextSibling);
+                } else {
+                  mathDiv.parentNode?.appendChild(trailingP);
+                }
+                setCaretInParagraph(trailingP);
+                inserted = true;
+              } else if (parentBlock && parentBlock !== el && parentBlock.parentNode === el) {
+                // Insert after non-empty paragraph
+                const trailingP = createTrailingParagraph();
+                if (parentBlock.nextSibling) {
+                  el.insertBefore(mathDiv, parentBlock.nextSibling);
+                  el.insertBefore(trailingP, mathDiv.nextSibling);
+                } else {
+                  el.appendChild(mathDiv);
+                  el.appendChild(trailingP);
+                }
+                setCaretInParagraph(trailingP);
+                inserted = true;
+              } else {
+                if (range.cloneContents().querySelector(".math-block")) {
+                  range.collapse(false);
+                }
+                range.deleteContents();
+                range.insertNode(mathDiv);
+                const trailingP = createTrailingParagraph();
+                if (mathDiv.nextSibling) {
+                  mathDiv.parentNode?.insertBefore(trailingP, mathDiv.nextSibling);
+                } else {
+                  mathDiv.parentNode?.appendChild(trailingP);
+                }
+                setCaretInParagraph(trailingP);
+                inserted = true;
+              }
+            }
+          } catch (err) {
+            console.warn("Could not insert math into saved range:", err);
+          }
+        }
+
+        // 2. Fallback: append inside editor (or into last paragraph)
+        if (!inserted) {
+          const lastChild = el.lastElementChild;
+          const trailingP = createTrailingParagraph();
+          if (
+            lastChild &&
+            (lastChild.tagName === "P" || lastChild.tagName === "DIV") &&
+            (!lastChild.textContent?.trim() || lastChild.innerHTML === "<br>")
+          ) {
+            lastChild.replaceWith(mathDiv);
+            el.appendChild(trailingP);
+          } else {
+            el.appendChild(mathDiv);
+            el.appendChild(trailingP);
+          }
+          setCaretInParagraph(trailingP);
+          inserted = true;
+        }
+
+        currentMathElementRef.current = null;
+        triggerChange();
+        updateFormatState();
+      },
+      [triggerChange, updateFormatState],
+    );
+
+    const updateMathBlock = useCallback(
+      (latex: string, targetEl?: HTMLElement | null) => {
+        const mathEl = targetEl ?? currentMathElementRef.current;
+        if (!mathEl || !editorRef.current?.contains(mathEl)) {
+          // Strict Invariant: Never overwrite an arbitrary math block if none was explicitly targeted!
+          insertMathBlock(latex);
+          return;
+        }
+        mathEl.setAttribute("data-latex", latex);
+        const previewText = latex.length > 60 ? latex.slice(0, 57) + "…" : latex;
+        mathEl.innerHTML = `<span style="opacity:0.7;font-size:1.1em;">∑</span><span>${previewText}</span>`;
+        currentMathElementRef.current = null;
+        triggerChange();
+        updateFormatState();
+      },
+      [insertMathBlock, triggerChange, updateFormatState],
+    );
+
+    const clearActiveMathElement = useCallback(() => {
+      currentMathElementRef.current = null;
       updateFormatState();
-    }, [triggerChange, updateFormatState]);
-
-    const updateMathBlock = useCallback((latex: string) => {
-      const mathEl = currentMathElementRef.current;
-      if (!mathEl) return;
-      mathEl.setAttribute("data-latex", latex);
-      mathEl.innerHTML = `<span style="opacity:0.7;font-size:1.1em;">∑</span><span>${latex.length > 60 ? latex.slice(0, 57) + "…" : latex}</span>`;
-      triggerChange();
-    }, [triggerChange]);
+    }, [updateFormatState]);
 
     const getMathInfo = useCallback((): { latex: string } | null => {
       const mathEl = currentMathElementRef.current;
@@ -591,6 +720,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         getTableInfo,
         insertMathBlock,
         updateMathBlock,
+        clearActiveMathElement,
         getMathInfo,
         focus: () => editorRef.current?.focus(),
         getFormatState: () => formatState,
@@ -614,6 +744,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         formatState,
         insertMathBlock,
         updateMathBlock,
+        clearActiveMathElement,
         getMathInfo,
       ],
     );
@@ -624,6 +755,30 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
           e.preventDefault();
           triggerChange();
           return;
+        }
+      }
+
+      if (e.key === "Backspace" || e.key === "Delete") {
+        const sel = window.getSelection();
+        const anchor = sel?.anchorNode;
+        if (sel && sel.rangeCount > 0 && sel.isCollapsed && anchor && editorRef.current?.contains(anchor)) {
+          if (e.key === "Backspace") {
+            const prev = anchor.previousSibling;
+            if (prev && prev.nodeType === 1 && (prev as HTMLElement).classList.contains("math-block")) {
+              e.preventDefault();
+              (prev as HTMLElement).remove();
+              triggerChange();
+              return;
+            }
+          } else if (e.key === "Delete") {
+            const next = anchor.nextSibling;
+            if (next && next.nodeType === 1 && (next as HTMLElement).classList.contains("math-block")) {
+              e.preventDefault();
+              (next as HTMLElement).remove();
+              triggerChange();
+              return;
+            }
+          }
         }
       }
 
@@ -674,9 +829,106 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         onInput={triggerChange}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
-        onKeyUp={updateFormatState}
-        onMouseUp={updateFormatState}
+        onBlur={saveSelection}
+        onKeyUp={() => {
+          saveSelection();
+          updateFormatState();
+        }}
+        onMouseUp={() => {
+          saveSelection();
+          updateFormatState();
+        }}
         onFocus={updateFormatState}
+        onMouseDown={(e) => {
+          const el = editorRef.current;
+          if (!el) return;
+          const target = e.target as HTMLElement | null;
+          // If user clicked directly in the editor padding/background (empty space below content)
+          if (target === el) {
+            const lastChild = el.lastElementChild;
+            const lastRect = lastChild?.getBoundingClientRect();
+            if (!lastRect || e.clientY >= lastRect.bottom - 4) {
+              e.preventDefault();
+              el.focus();
+              let targetP: HTMLElement;
+              if (
+                lastChild &&
+                lastChild.tagName === "P" &&
+                (!lastChild.textContent?.trim() || lastChild.innerHTML === "<br>")
+              ) {
+                targetP = lastChild as HTMLElement;
+              } else {
+                targetP = document.createElement("p");
+                targetP.innerHTML = "<br>";
+                el.appendChild(targetP);
+                triggerChange();
+              }
+              const sel = window.getSelection();
+              if (sel) {
+                const range = document.createRange();
+                range.setStart(targetP, 0);
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+                savedRangeRef.current = range.cloneRange();
+              }
+              currentMathElementRef.current = null;
+              updateFormatState();
+            }
+          }
+        }}
+        onClick={(e) => {
+          const el = editorRef.current;
+          if (!el) return;
+          const target = e.target as HTMLElement | null;
+          const mathBlock = target?.closest?.(".math-block") as HTMLElement | null;
+          if (mathBlock) {
+            const latex = mathBlock.getAttribute("data-latex") ?? "";
+            currentMathElementRef.current = mathBlock;
+            const baseState = queryActiveFormats();
+            currentMathElementRef.current = mathBlock;
+            const updated = {
+              ...baseState,
+              mathInfo: { latex, element: mathBlock },
+            };
+            setFormatState(updated);
+            onFormatChange?.(updated);
+            onMathBlockClick?.(latex, mathBlock);
+            return;
+          }
+
+          currentMathElementRef.current = null;
+
+          // If click was on empty space, make sure caret and savedRange are established
+          if (target === el) {
+            const lastChild = el.lastElementChild;
+            const lastRect = lastChild?.getBoundingClientRect();
+            if (!lastRect || e.clientY >= lastRect.bottom - 4) {
+              let targetP =
+                lastChild &&
+                lastChild.tagName === "P" &&
+                (!lastChild.textContent?.trim() || lastChild.innerHTML === "<br>")
+                  ? (lastChild as HTMLElement)
+                  : null;
+              if (!targetP) {
+                targetP = document.createElement("p");
+                targetP.innerHTML = "<br>";
+                el.appendChild(targetP);
+                triggerChange();
+              }
+              const sel = window.getSelection();
+              if (sel) {
+                const range = document.createRange();
+                range.setStart(targetP, 0);
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+                savedRangeRef.current = range.cloneRange();
+              }
+              updateFormatState();
+            }
+          }
+        }}
         className={cn(
           "min-h-0 flex-1 rounded-lg border border-input bg-card p-4 text-base leading-relaxed text-foreground outline-none transition-colors cursor-text",
           "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",

@@ -16,7 +16,8 @@ export interface MathFormulaModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialLatex?: string;
-  mode?: "insert" | "update";
+  mode?: "insert" | "update" | "edit";
+  targetElement?: HTMLElement | null;
   onConfirm?: (latex: string) => void;
   editorRef?: React.RefObject<RichContentEditorHandle | null>;
 }
@@ -71,6 +72,7 @@ export function MathFormulaModal({
   onClose,
   initialLatex = "",
   mode = "insert",
+  targetElement,
   onConfirm,
   editorRef,
 }: MathFormulaModalProps) {
@@ -195,6 +197,11 @@ export function MathFormulaModal({
     return () => clearTimeout(timer);
   }, [isOpen, latex]);
 
+  const handleClose = useCallback(() => {
+    editorRef?.current?.clearActiveMathElement?.();
+    onClose();
+  }, [editorRef, onClose]);
+
   const handleSubmit = useCallback(() => {
     const trimmed = latex.trim();
     if (!trimmed) return;
@@ -202,14 +209,14 @@ export function MathFormulaModal({
     if (onConfirm) {
       onConfirm(trimmed);
     } else if (editorRef?.current) {
-      if (mode === "update") {
-        editorRef.current.updateMathBlock(trimmed);
+      if (mode === "update" || mode === "edit") {
+        editorRef.current.updateMathBlock(trimmed, targetElement);
       } else {
         editorRef.current.insertMathBlock(trimmed);
       }
     }
-    onClose();
-  }, [latex, onConfirm, editorRef, mode, onClose]);
+    handleClose();
+  }, [latex, onConfirm, editorRef, mode, targetElement, handleClose]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
@@ -218,15 +225,17 @@ export function MathFormulaModal({
     }
   };
 
+  const isEditMode = mode === "update" || mode === "edit";
+
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <DialogContent className="max-w-xl p-5 sm:max-w-2xl">
         <DialogHeader className="space-y-1">
           <DialogTitle className="text-base font-semibold flex items-center gap-2">
             <span className="flex size-6 items-center justify-center rounded bg-primary/10 text-xs font-serif text-primary">
               ∑
             </span>
-            {mode === "update" ? "Edit Math Formula" : "Insert Math Formula"}
+            {isEditMode ? "Edit Math Formula" : "Insert Math Formula"}
           </DialogTitle>
         </DialogHeader>
 
@@ -323,7 +332,7 @@ export function MathFormulaModal({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button type="button" variant="outline" size="sm" onClick={onClose} className="cursor-pointer">
+          <Button type="button" variant="outline" size="sm" onClick={handleClose} className="cursor-pointer">
             Cancel
           </Button>
           <Button
@@ -334,7 +343,7 @@ export function MathFormulaModal({
             onClick={handleSubmit}
             className="cursor-pointer"
           >
-            {mode === "update" ? "Update Formula" : "Insert Formula"}
+            {isEditMode ? "Update Formula" : "Insert Formula"}
           </Button>
         </DialogFooter>
       </DialogContent>

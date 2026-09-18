@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Bold,
   Italic,
@@ -47,9 +47,27 @@ interface EditorToolbarProps {
   editorRef: React.RefObject<RichContentEditorHandle | null>;
   formatState: FormatState;
   className?: string;
+  mathModalOpen?: boolean;
+  mathModalMode?: "insert" | "update" | "edit";
+  mathInitialLatex?: string;
+  mathTargetElement?: HTMLElement | null;
+  onOpenInsertMath?: () => void;
+  onCloseMathModal?: () => void;
+  onMathModalOpenChange?: (open: boolean) => void;
 }
 
-export function EditorToolbar({ editorRef, formatState, className }: EditorToolbarProps) {
+export function EditorToolbar({
+  editorRef,
+  formatState,
+  className,
+  mathModalOpen: controlledMathModalOpen,
+  mathModalMode = "insert",
+  mathInitialLatex = "",
+  mathTargetElement,
+  onOpenInsertMath,
+  onCloseMathModal,
+  onMathModalOpenChange,
+}: EditorToolbarProps) {
   const [colorMenuOpen, setColorMenuOpen] = useState(false);
   const [highlightMenuOpen, setHighlightMenuOpen] = useState(false);
   const [scaleMenuOpen, setScaleMenuOpen] = useState(false);
@@ -57,7 +75,18 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
 
   const [tableRows, setTableRows] = useState(4);
   const [tableCols, setTableCols] = useState(3);
-  const [mathModalOpen, setMathModalOpen] = useState(false);
+  const [internalMathModalOpen, setInternalMathModalOpen] = useState(false);
+  const mathModalOpen = controlledMathModalOpen !== undefined ? controlledMathModalOpen : internalMathModalOpen;
+  const setMathModalOpen = useCallback(
+    (open: boolean) => {
+      if (onMathModalOpenChange) {
+        onMathModalOpenChange(open);
+      } else {
+        setInternalMathModalOpen(open);
+      }
+    },
+    [onMathModalOpenChange],
+  );
 
   const colorRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -562,15 +591,12 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
       {/* Math Formula Button */}
       <Button
         type="button"
-        variant={formatState.mathInfo ? "secondary" : "ghost"}
+        variant="ghost"
         size="sm"
         onMouseDown={(e) => e.preventDefault()}
-        onClick={() => setMathModalOpen(true)}
-        title={formatState.mathInfo ? "Edit math formula (click to edit)" : "Insert math formula (LaTeX)"}
-        className={cn(
-          "h-8 gap-1.5 px-2 text-xs cursor-pointer",
-          formatState.mathInfo && "bg-primary/10 text-primary border border-primary/20 font-medium",
-        )}
+        onClick={onOpenInsertMath ?? (() => setMathModalOpen(true))}
+        title="Insert math formula (LaTeX)"
+        className="h-8 gap-1.5 px-2 text-xs cursor-pointer"
       >
         <Sigma className="size-3.5" />
         <span className="hidden sm:inline text-xs font-medium">Math</span>
@@ -593,9 +619,10 @@ export function EditorToolbar({ editorRef, formatState, className }: EditorToolb
       {/* Math Formula Modal */}
       <MathFormulaModal
         isOpen={mathModalOpen}
-        onClose={() => setMathModalOpen(false)}
-        initialLatex={formatState.mathInfo?.latex ?? ""}
-        mode={formatState.mathInfo ? "update" : "insert"}
+        onClose={onCloseMathModal ?? (() => setMathModalOpen(false))}
+        initialLatex={mathInitialLatex || (formatState.mathInfo?.latex ?? "")}
+        mode={mathModalMode}
+        targetElement={mathTargetElement ?? null}
         editorRef={editorRef}
       />
     </div>

@@ -594,8 +594,9 @@ function mathFlowBlock(
   const coords = {
     rulingSpacing: settings.fontSize * settings.lineSpacing,
   };
-  const padding = settings.fontSize * 0.3;
-  const lineUnits = computeLineUnits(box, coords.rulingSpacing, padding);
+  // Do not inflate single-line formulas with arbitrary padding:
+  // rulingSpacing already includes standard inter-line leading.
+  const lineUnits = computeLineUnits(box, coords.rulingSpacing, 0);
 
   return [{ type: "mathBlock", latex, lineUnits, gapLines: 0 }];
 }

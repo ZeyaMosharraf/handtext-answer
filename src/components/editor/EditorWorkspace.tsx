@@ -105,6 +105,46 @@ export function EditorWorkspace({ project }: { project: Project }) {
     blackInk: false,
     hasSelection: false,
   });
+  const [mathModalState, setMathModalState] = useState<{
+    isOpen: boolean;
+    mode: "insert" | "edit";
+    initialLatex: string;
+    targetElement: HTMLElement | null;
+  }>({
+    isOpen: false,
+    mode: "insert",
+    initialLatex: "",
+    targetElement: null,
+  });
+
+  const handleOpenInsertMath = useCallback(() => {
+    richEditorRef.current?.clearActiveMathElement?.();
+    setMathModalState({
+      isOpen: true,
+      mode: "insert",
+      initialLatex: "",
+      targetElement: null,
+    });
+  }, []);
+
+  const handleOpenEditMath = useCallback((latex: string, element: HTMLElement) => {
+    setMathModalState({
+      isOpen: true,
+      mode: "edit",
+      initialLatex: latex,
+      targetElement: element,
+    });
+  }, []);
+
+  const handleCloseMathModal = useCallback(() => {
+    richEditorRef.current?.clearActiveMathElement?.();
+    setMathModalState({
+      isOpen: false,
+      mode: "insert",
+      initialLatex: "",
+      targetElement: null,
+    });
+  }, []);
 
   const past = useRef<Draft[]>([]);
   const future = useRef<Draft[]>([]);
@@ -524,6 +564,12 @@ export function EditorWorkspace({ project }: { project: Project }) {
             <EditorToolbar
               editorRef={richEditorRef}
               formatState={formatState}
+              mathModalOpen={mathModalState.isOpen}
+              mathModalMode={mathModalState.mode}
+              mathInitialLatex={mathModalState.initialLatex}
+              mathTargetElement={mathModalState.targetElement}
+              onOpenInsertMath={handleOpenInsertMath}
+              onCloseMathModal={handleCloseMathModal}
             />
           </div>
 
@@ -533,6 +579,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
               value={content}
               onChange={(html) => commit((p) => ({ ...p, content: html }))}
               onFormatChange={setFormatState}
+              onMathBlockClick={handleOpenEditMath}
               placeholder="Write or paste your answer here..."
               className="flex-1 min-h-0 h-full overflow-y-auto"
             />

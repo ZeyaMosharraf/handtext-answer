@@ -349,8 +349,20 @@ export function parseInlineHtml(innerHtml: string): Seg[] {
  * Parses structured HTML from the rich text editor directly into Block[] and Seg[]
  * runs without intermediate markdown syntax or markers. Works universally in browser and Node/SSR.
  */
-export function parseHtmlContent(html: string): Block[] {
+export function parseHtmlContent(html: string, mathBlocksMap = new Map<string, string>()): Block[] {
   const blocks: Block[] = [];
+
+  // Pre-extract math blocks so nested <div> wrappers in contenteditable never truncate blockRegex
+  let mathCounter = mathBlocksMap.size;
+  const tokenizedHtml = html.replace(
+    /<div[^>]*class=["'][^"']*math-block[^"']*["'][^>]*data-latex=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>|<div[^>]*data-latex=["']([^"']*)["'][^>]*class=["'][^"']*math-block[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+    (_, latex1, latex2) => {
+      const latex = unescapeHtml(latex1 || latex2 || "");
+      const token = `__MATH_BLOCK_TOKEN_${mathCounter++}__`;
+      mathBlocksMap.set(token, latex);
+      return `<p data-math-token="${token}"></p>`;
+    },
+  );
 
   // Match top-level blocks or sequential block tags
   const blockRegex =
@@ -359,9 +371,9 @@ export function parseHtmlContent(html: string): Block[] {
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = blockRegex.exec(html)) !== null) {
+  while ((match = blockRegex.exec(tokenizedHtml)) !== null) {
     // Check if there was non-empty text before this block
-    const prevText = unescapeHtml(html.slice(lastIndex, match.index).replace(/<[^>]+>/g, "")).trim();
+    const prevText = unescapeHtml(tokenizedHtml.slice(lastIndex, match.index).replace(/<[^>]+>/g, "")).trim();
     if (prevText) {
       blocks.push({
         kind: "paragraph",
@@ -375,7 +387,16 @@ export function parseHtmlContent(html: string): Block[] {
     const attrs = match[2] ?? "";
     const inner = match[3] ?? "";
 
-    // Check if the block tag itself is a math-block container
+    // Check if the block tag itself is a math-block token or container
+    const tokenMatch = attrs.match(/data-math-token=["']([^"']*)["']/i);
+    if (tokenMatch && mathBlocksMap.has(tokenMatch[1]!)) {
+      const latex = mathBlocksMap.get(tokenMatch[1]!)!;
+      if (latex.trim()) {
+        blocks.push({ kind: "math", text: latex, math: { latex, display: "block" } });
+      }
+      continue;
+    }
+
     const latexAttrMatch = attrs.match(/data-latex=["']([^"']*)["']/i);
     if (latexAttrMatch || attrs.includes("math-block")) {
       const latex = latexAttrMatch ? unescapeHtml(latexAttrMatch[1] ?? "") : inner.trim();
@@ -507,30 +528,37 @@ export function parseHtmlContent(html: string): Block[] {
     }
 
     if (tag === "div" && /<(h1|h2|h3|h4|blockquote|hr|table|ul|ol|p|div|pre)\b/i.test(inner)) {
-      blocks.push(...parseHtmlContent(inner));
+      blocks.push(...parseHtmlContent(inner, mathBlocksMap));
       continue;
     }
 
     if (tag === "p" || tag === "div" || tag === "pre") {
-      // Check if inner contains nested math-block elements
-      if (inner.includes("math-block") || inner.includes("data-latex")) {
-        const mathDivRegex = /<div[^>]*?(?:class=["'][^"']*math-block[^"']*["']|data-latex=["']([^"']*)["'])[^>]*>[\s\S]*?<\/div>/gi;
+      // Check if inner contains nested math-block elements or math tokens
+      if (inner.includes("data-math-token") || inner.includes("math-block") || inner.includes("data-latex")) {
+        const mathPattern =
+          /<p[^>]*data-math-token=["']([^"']*)["'][^>]*><\/p>|<div[^>]*?(?:class=["'][^"']*math-block[^"']*["']|data-latex=["']([^"']*)["'])[^>]*>[\s\S]*?<\/div>/gi;
         let lastInnerIdx = 0;
         let mMatch: RegExpExecArray | null;
-        while ((mMatch = mathDivRegex.exec(inner)) !== null) {
+        while ((mMatch = mathPattern.exec(inner)) !== null) {
           const beforeHtml = inner.slice(lastInnerIdx, mMatch.index);
           const beforeSegs = parseInlineHtml(beforeHtml);
           const beforeText = segText(beforeSegs).trim();
           if (beforeText) {
             blocks.push({ kind: "paragraph", text: segText(beforeSegs), segs: beforeSegs });
           }
-          const divTag = mMatch[0];
-          const lMatch = divTag.match(/data-latex=["']([^"']*)["']/i);
-          const latex = lMatch ? unescapeHtml(lMatch[1] ?? "") : "";
+          let latex = "";
+          const token = mMatch[1];
+          if (token && mathBlocksMap.has(token)) {
+            latex = mathBlocksMap.get(token)!;
+          } else {
+            const divTag = mMatch[0];
+            const lMatch = divTag.match(/data-latex=["']([^"']*)["']/i);
+            latex = lMatch ? unescapeHtml(lMatch[1] ?? "") : "";
+          }
           if (latex) {
             blocks.push({ kind: "math", text: latex, math: { latex, display: "block" } });
           }
-          lastInnerIdx = mathDivRegex.lastIndex;
+          lastInnerIdx = mathPattern.lastIndex;
         }
         const afterHtml = inner.slice(lastInnerIdx);
         const afterSegs = parseInlineHtml(afterHtml);
@@ -558,7 +586,7 @@ export function parseHtmlContent(html: string): Block[] {
   }
 
   // Handle trailing content if any
-  const trailing = unescapeHtml(html.slice(lastIndex).replace(/<[^>]+>/g, "")).trim();
+  const trailing = unescapeHtml(tokenizedHtml.slice(lastIndex).replace(/<[^>]+>/g, "")).trim();
   if (trailing) {
     blocks.push({
       kind: "paragraph",
@@ -793,6 +821,16 @@ export function blocksToHtml(blocks: Block[]): string {
         }
         break;
       }
+      case "math": {
+        const latex = b.math?.latex ?? b.text;
+        const escLatex = latex.replace(/"/g, "&quot;");
+        const preview = latex.length > 60 ? latex.slice(0, 57) + "…" : latex;
+        const escPreview = preview.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        parts.push(
+          `<div class="math-block" data-latex="${escLatex}" contenteditable="false" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;margin:4px 0;border-radius:6px;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.25);cursor:pointer;user-select:none;font-family:monospace;font-size:0.82em;color:#4338ca;white-space:nowrap;"><span style="opacity:0.7;font-size:1.1em;">∑</span><span>${escPreview}</span></div>`,
+        );
+        break;
+      }
       case "paragraph":
       default:
         parts.push(`<p>${segsToHtml(b.segs)}</p>`);
@@ -847,7 +885,11 @@ export function tableToMarkdown(table: TableData): string {
 export function htmlToPlainText(html: string): string {
   if (!html) return "";
   if (!isHtmlContent(html)) return html;
-  const withLineBreaks = html
+  const withMath = html.replace(
+    /<div[^>]*class=["'][^"']*math-block[^"']*["'][^>]*data-latex=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>/gi,
+    (_, latex) => `\n$$\n${unescapeHtml(latex)}\n$$\n`,
+  );
+  const withLineBreaks = withMath
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|h[1-6]|li|tr|blockquote|pre)>/gi, "\n")
     .replace(/<hr\s*\/?>/gi, "\n---\n");

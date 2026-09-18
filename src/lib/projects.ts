@@ -32,6 +32,20 @@ export async function listProjects(): Promise<Project[]> {
 }
 
 export async function getProject(id: string): Promise<Project> {
+  if (import.meta.env.DEV && id === "dev") {
+    return {
+      id: "dev",
+      user_id: "dev-test-user",
+      name: "Math UAT Playground",
+      question: "Information Theory Entropy Question",
+      content: "<p>Write your math formula below:</p>",
+      settings: withDefaults({}),
+      page_count: 1,
+      status: "draft",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+  }
   const { data, error } = await supabase.from("projects").select("*").eq("id", id).single();
   if (error) throw error;
   return normalise(data);
@@ -56,6 +70,20 @@ export async function updateProject(
     settings?: HandwritingSettings;
   },
 ): Promise<Project> {
+  if (import.meta.env.DEV && id === "dev") {
+    return {
+      id: "dev",
+      user_id: "dev-test-user",
+      name: patch.name ?? "Math UAT Playground",
+      question: patch.question ?? "Information Theory Entropy Question",
+      content: patch.content ?? "<p>Write your math formula below:</p>",
+      settings: patch.settings ? withDefaults(patch.settings) : withDefaults({}),
+      page_count: patch.page_count ?? 1,
+      status: patch.status ?? "draft",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+  }
   const { data, error } = await supabase
     .from("projects")
     .update(patch as unknown as never)

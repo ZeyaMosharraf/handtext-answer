@@ -404,14 +404,30 @@ function drawMathBlock(
   const ast = parseMath(placement.latex);
   const box = layoutMath(ast, ctx, settings, 1.0);
 
-  // Baseline: lock to the first ruled line of this block's allocation
-  const baselineY = getBaseline(coordinates, placement.lineIndex);
+  // Baseline:
+  // For 1-line formulas, lock directly to the ruled line baseline for 100% handwriting consistency.
+  // For multi-line formulas (e.g. 2-story fractions), balance the formula's math axis across the allocated lines.
+  const rulingSpacing = coordinates.rulingSpacing;
+  const ruledLineY = getBaseline(coordinates, placement.lineIndex);
+  let baselineY = ruledLineY;
 
-  // Horizontal: center wide formulas, left-align narrow ones
-  const contentWidth = coordinates.contentRight - coordinates.contentLeft;
-  const startX = box.width < contentWidth
-    ? coordinates.contentLeft
-    : coordinates.contentLeft;
+  if (placement.lineUnits === 1) {
+    // For 1-line formulas, lock directly to the ruled line baseline for normal text/math.
+    // If expression has a deep descent (like a compact fraction denominator),
+    // lift it so the bottom rests cleanly on the ruled line instead of cutting through.
+    if (box.descent > rulingSpacing * 0.12) {
+      baselineY = ruledLineY - box.descent;
+    }
+  } else {
+    // For multi-line formulas (e.g. multi-line fractions, integrals, large matrices),
+    // center the formula box vertically across the allocated ruled lines band.
+    const bandCenterY = ruledLineY + (placement.lineUnits - 1) * rulingSpacing * 0.5;
+    const boxCenterRel = (box.descent - box.ascent) * 0.5;
+    baselineY = bandCenterY - boxCenterRel;
+  }
+
+  // Left-align with content margin matching normal handwritten lines
+  const startX = coordinates.contentLeft;
 
   box.draw(ctx, startX, baselineY, settings, random, ink);
 }
