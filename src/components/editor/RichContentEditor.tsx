@@ -294,8 +294,11 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         block.setAttribute("data-margin-type", marker.type);
         if (marker.color) {
           block.setAttribute("data-margin-color", marker.color);
+          // Set CSS custom property so ::before can read it via var()
+          block.style.setProperty("--marker-color", marker.color);
         } else {
           block.removeAttribute("data-margin-color");
+          block.style.removeProperty("--marker-color");
         }
         setMarkerPopover(null);
         triggerChange();
@@ -310,6 +313,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       block.removeAttribute("data-margin-marker");
       block.removeAttribute("data-margin-type");
       block.removeAttribute("data-margin-color");
+      block.style.removeProperty("--marker-color");
       setMarkerPopover(null);
       triggerChange();
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -583,6 +587,11 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
             chip.style.background = "";
           }
         });
+      });
+      // Restore --marker-color CSS custom property for blocks that have a saved color
+      container.querySelectorAll<HTMLElement>("[data-margin-color]").forEach((block) => {
+        const color = block.getAttribute("data-margin-color");
+        if (color) block.style.setProperty("--marker-color", color);
       });
     }, []);
 
@@ -1645,6 +1654,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
           <style>{`
             .rich-editor-gutter-surface [data-margin-marker] {
               position: relative;
+              min-height: 1.6em;
             }
             .rich-editor-gutter-surface [data-margin-marker]::before {
               content: attr(data-margin-marker);
@@ -1652,6 +1662,8 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
               left: -${marginWidth + 10}px;
               width: ${marginWidth - 4}px;
               top: 0;
+              display: block;
+              min-height: 1.5em;
               text-align: right;
               font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
               font-size: 12px;
@@ -1711,6 +1723,11 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
             .dark .rich-editor-gutter-surface [data-margin-type="custom"]::before {
               color: #cbd5e1;
               background-color: rgba(203, 213, 225, 0.15);
+            }
+            .rich-editor-gutter-surface [data-margin-color]::before {
+              color: var(--marker-color, inherit) !important;
+              background-color: color-mix(in srgb, var(--marker-color, currentColor) 12%, transparent) !important;
+              border: 1px solid color-mix(in srgb, var(--marker-color, currentColor) 30%, transparent);
             }
             .rich-editor-gutter-surface [data-margin-marker]:hover::before {
               filter: brightness(0.92);
