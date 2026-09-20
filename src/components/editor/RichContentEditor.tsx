@@ -1965,7 +1965,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
             paddingLeft: isMarginEnabled ? `${marginWidth + 18}px` : undefined,
           }}
           className={cn(
-            "min-h-0 flex-1 rounded-lg border border-input bg-card p-4 text-base leading-relaxed text-foreground outline-none transition-colors cursor-text caret-foreground",
+            "min-h-0 flex-1 rounded-lg border border-input bg-card p-4 text-base leading-relaxed text-foreground outline-none transition-colors cursor-text caret-foreground rich-editor-surface",
             "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
             "overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]",
             isMarginEnabled && "rich-editor-gutter-surface",

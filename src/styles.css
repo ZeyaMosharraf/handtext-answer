@@ -194,3 +194,46 @@
 .dark .math-chip-btn:hover {
   background: rgba(255, 255, 255, 0.18);
 }
+
+/* ─── Rich editor surface: suppress ink color / font-size / highlight ─────
+ * Color, size, and highlight are metadata for the handwriting renderer only.
+ * In the content editor panel, text always renders at foreground color and
+ * base size regardless of what data-* attributes are stored.
+ * Bold, italic, underline still show through (they don't use inline color/size).
+ * ──────────────────────────────────────────────────────────────────────── */
+.rich-editor-surface *:not(.math-block-themed):not(.math-block-themed *):not(.graph-block):not(.graph-block *) {
+  color: inherit !important;
+  font-size: inherit !important;
+  background-color: transparent !important;
+}
+
+/* Keep <mark> / highlight fully transparent in the panel */
+.rich-editor-surface mark {
+  background: transparent !important;
+  color: inherit !important;
+}
+
+/* Bold/italic/underline DO show in the panel — restore them */
+.rich-editor-surface strong,
+.rich-editor-surface b {
+  font-weight: bold !important;
+}
+
+.rich-editor-surface em,
+.rich-editor-surface i {
+  font-style: italic !important;
+}
+
+.rich-editor-surface u {
+  text-decoration: underline !important;
+}
+
+/* Table cell backgrounds should still work */
+.rich-editor-surface th,
+.rich-editor-surface td {
+  background-color: unset !important;
+}
+
+.rich-editor-surface th {
+  background-color: color-mix(in oklch, var(--color-muted) 40%, transparent) !important;
+}
