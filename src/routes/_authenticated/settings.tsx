@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge, Button, Card, Input, Label, Select } from "@/components/ui/primitives";
+import { ThemeSegmentedControl } from "@/components/ThemeToggle";
 import { signOut, useAuth } from "@/hooks/useAuth";
 import { HANDWRITING_STYLES, PAPERS } from "@/lib/handwriting";
 import { planById } from "@/lib/plans";
@@ -105,6 +106,16 @@ function SettingsPage() {
           <Label htmlFor="email">Email</Label>
           <Input id="email" value={user?.email ?? ""} readOnly className="bg-muted" />
         </div>
+      </Card>
+
+      <Card className="mt-5 space-y-4 p-6">
+        <div>
+          <h2 className="font-semibold">Appearance</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Choose your application theme interface. Handwritten document pages remain controlled by paper settings.
+          </p>
+        </div>
+        <ThemeSegmentedControl className="max-w-md" />
       </Card>
 
       <Card className="mt-5 space-y-4 p-6">

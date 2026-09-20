@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
@@ -60,6 +60,35 @@
   --border: oklch(0.9 0.008 265);
   --input: oklch(0.9 0.008 265);
   --ring: oklch(0.52 0.19 268);
+  color-scheme: light;
+}
+
+.dark {
+  --radius: 0.75rem;
+  --background: oklch(0.14 0.015 260);
+  --foreground: oklch(0.96 0.006 260);
+  --surface: oklch(0.17 0.018 260);
+  --card: oklch(0.18 0.018 260);
+  --card-foreground: oklch(0.96 0.006 260);
+  --popover: oklch(0.20 0.02 260);
+  --popover-foreground: oklch(0.96 0.006 260);
+  --primary: oklch(0.64 0.21 264);
+  --primary-foreground: oklch(0.99 0.005 268);
+  --secondary: oklch(0.24 0.02 260);
+  --secondary-foreground: oklch(0.92 0.01 260);
+  --muted: oklch(0.22 0.015 260);
+  --muted-foreground: oklch(0.68 0.018 260);
+  --accent: oklch(0.26 0.03 264);
+  --accent-foreground: oklch(0.96 0.01 260);
+  --destructive: oklch(0.62 0.22 25);
+  --destructive-foreground: oklch(0.99 0.005 25);
+  --success: oklch(0.66 0.16 155);
+  --border: oklch(0.28 0.018 260);
+  --input: oklch(0.28 0.018 260);
+  --ring: oklch(0.64 0.21 264);
+  --shadow-soft: 0 1px 2px oklch(0.05 0.01 260 / 0.5), 0 8px 24px oklch(0.05 0.01 260 / 0.4);
+  --shadow-lift: 0 2px 4px oklch(0.05 0.01 260 / 0.6), 0 18px 40px oklch(0.05 0.01 260 / 0.5);
+  color-scheme: dark;
 }
 
 @layer base {
@@ -113,4 +142,15 @@
   align-items: center;
   gap: 6px;
 }
+
+.dark .graph-block {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
+}
+
+.dark .graph-placeholder {
+  color: #34d399;
+}
+
 

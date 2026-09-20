@@ -694,10 +694,10 @@ export function GraphInsertModal({
           </div>
 
           {/* Technical Preview Canvas Column */}
-          <div className="flex flex-col items-center justify-center p-3 rounded-xl bg-slate-50 border border-slate-200">
+          <div className="flex flex-col items-center justify-center p-3 rounded-xl bg-muted/40 border border-border">
             <canvas
               ref={canvasRef}
-              className="w-full h-[220px] rounded-lg border border-slate-200 shadow-sm bg-white"
+              className="w-full h-[220px] rounded-lg border border-border shadow-sm bg-white"
             />
             <p className="text-[10px] text-muted-foreground mt-2 text-center">
               Technical preview (final page output will be rendered as natural handwriting strokes)

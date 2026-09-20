@@ -29,6 +29,7 @@ import { EditorToolbar } from "@/components/editor/EditorToolbar";
 import { FloatingFormatBubble } from "@/components/editor/FloatingFormatBubble";
 import { ResultView } from "@/components/editor/ResultView";
 import { RichContentEditor, type FormatState, type RichContentEditorHandle } from "@/components/editor/RichContentEditor";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import type { GraphDefinition } from "@/lib/graph/types";
 import { Button, Card, Input, Spinner, Textarea } from "@/components/ui/primitives";
 import {
@@ -546,6 +547,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
               {generating ? <Spinner /> : <Wand2 className="size-4" />}
               Generate
             </Button>
+            <ThemeToggle />
           </div>
         </div>
       </header>

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { Logo } from "@/components/SiteHeader";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge, Button, Card, Input, Label, Spinner } from "@/components/ui/primitives";
 import { signOut, useAuth } from "@/hooks/useAuth";
 import { DEFAULT_SETTINGS, HANDWRITING_STYLES } from "@/lib/handwriting";
@@ -77,6 +78,7 @@ function Dashboard() {
                 <Settings className="size-4" /> Settings
               </Button>
             </Link>
+            <ThemeToggle />
             <Button
               variant="outline"
               size="sm"

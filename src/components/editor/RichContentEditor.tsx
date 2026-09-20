@@ -1646,16 +1646,28 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
               color: #1d3fb5;
               background-color: rgba(29, 63, 181, 0.08);
             }
+            .dark .rich-editor-gutter-surface [data-margin-type="question"]::before {
+              color: #60a5fa;
+              background-color: rgba(96, 165, 250, 0.15);
+            }
             .rich-editor-gutter-surface [data-margin-type="answer"]::before {
               font-weight: 700;
               font-style: italic;
               color: #141821;
               background-color: rgba(20, 24, 33, 0.06);
             }
+            .dark .rich-editor-gutter-surface [data-margin-type="answer"]::before {
+              color: #f1f5f9;
+              background-color: rgba(241, 245, 249, 0.12);
+            }
             .rich-editor-gutter-surface [data-margin-type="subquestion"]::before {
               font-weight: 600;
               color: #1d3fb5;
               background-color: rgba(29, 63, 181, 0.05);
+            }
+            .dark .rich-editor-gutter-surface [data-margin-type="subquestion"]::before {
+              color: #93c5fd;
+              background-color: rgba(147, 197, 253, 0.12);
             }
             .rich-editor-gutter-surface [data-margin-type="marks"]::before {
               font-weight: 600;
@@ -1663,14 +1675,26 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
               color: #b3231f;
               background-color: rgba(179, 35, 31, 0.08);
             }
+            .dark .rich-editor-gutter-surface [data-margin-type="marks"]::before {
+              color: #f87171;
+              background-color: rgba(248, 113, 113, 0.16);
+            }
             .rich-editor-gutter-surface [data-margin-type="custom"]::before {
               font-weight: 600;
               color: #4b5563;
               background-color: rgba(75, 85, 99, 0.08);
             }
+            .dark .rich-editor-gutter-surface [data-margin-type="custom"]::before {
+              color: #cbd5e1;
+              background-color: rgba(203, 213, 225, 0.15);
+            }
             .rich-editor-gutter-surface [data-margin-marker]:hover::before {
               filter: brightness(0.92);
               box-shadow: 0 0 0 1px rgba(29, 63, 181, 0.25);
+            }
+            .dark .rich-editor-gutter-surface [data-margin-marker]:hover::before {
+              filter: brightness(1.15);
+              box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.35);
             }
           `}</style>
         )}

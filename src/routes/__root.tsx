@@ -13,6 +13,7 @@ import { Toaster } from "sonner";
 import appCss from "../styles.css?url";
 
 import { supabase } from "@/integrations/supabase/client";
+import { ThemeProvider, useTheme } from "@/lib/theme";
 
 function NotFoundComponent() {
   return (
@@ -98,10 +99,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   errorComponent: ErrorComponent,
 });
 
+const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem("handtext-theme")||"system";var d=t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(d){document.documentElement.classList.add("dark");document.documentElement.style.colorScheme="dark";}else{document.documentElement.classList.remove("dark");document.documentElement.style.colorScheme="light";}}catch(e){}})();`;
+
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <HeadContent />
       </head>
       <body>
@@ -112,7 +116,12 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
-function RootComponent() {
+function ThemedToaster() {
+  const { resolvedTheme } = useTheme();
+  return <Toaster position="top-center" richColors closeButton theme={resolvedTheme} />;
+}
+
+function RootContent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
 
@@ -129,7 +138,15 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
-      <Toaster position="top-center" richColors closeButton />
+      <ThemedToaster />
     </QueryClientProvider>
+  );
+}
+
+function RootComponent() {
+  return (
+    <ThemeProvider defaultTheme="system" storageKey="handtext-theme">
+      <RootContent />
+    </ThemeProvider>
   );
 }

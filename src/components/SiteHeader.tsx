@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { PenLine } from "lucide-react";
 
 import { Button } from "@/components/ui/primitives";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/useAuth";
 
 export function Logo({ className = "" }: { className?: string }) {
@@ -53,6 +54,7 @@ export function SiteHeader() {
               </Link>
             </>
           )}
+          <ThemeToggle />
         </div>
       </div>
     </header>
