@@ -251,7 +251,10 @@ console.log("\n=== 7. Application Dark Mode Independence from A4 Paper Settings 
     page: {
       ...DEFAULT_SETTINGS.page,
       paperColor: "#ffffff",
-      rulingColor: "#93c5fd",
+      ruling: {
+        ...DEFAULT_SETTINGS.page.ruling,
+        color: "#93c5fd",
+      },
     },
   };
 
@@ -260,10 +263,10 @@ console.log("\n=== 7. Application Dark Mode Independence from A4 Paper Settings 
 
   // Verify settings remain unaltered
   assert(initialSettings.page.paperColor === "#ffffff", "A4 paperColor remains white in dark mode");
-  assert(initialSettings.page.rulingColor === "#93c5fd", "A4 rulingColor remains light blue ruled");
+  assert(initialSettings.page.ruling.color === "#93c5fd", "A4 rulingColor remains light blue ruled");
   assert(initialSettings.fontFamily === DEFAULT_SETTINGS.fontFamily, "Handwriting personality unaffected");
   assert(initialSettings.lineSpacing === DEFAULT_SETTINGS.lineSpacing, "Line spacing unaffected");
-  assert((initialSettings.answerMargin?.enabled ?? true) === true, "Answer margin settings unaffected");
+  assert((initialSettings.page.answerMargin?.enabled ?? true) === true, "Answer margin settings unaffected");
 }
 
 console.log(`\n========================================`);

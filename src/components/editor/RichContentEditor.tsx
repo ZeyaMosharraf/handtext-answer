@@ -207,14 +207,16 @@ export const MATH_INK_COLORS = [
 function formatMathBlockInner(latex: string, color?: string): string {
   const digitalHtml = renderDigitalMathToHtml(latex);
   const colorStyle = color ? `color:${color};` : "";
-  const swatchBg = color || "#1d3fb5";
-  return `<span class="math-digital-content" style="display:inline-flex;align-items:center;vertical-align:middle;${colorStyle}">${digitalHtml}</span><span class="math-chip-actions" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;opacity:0.8;font-size:11px;font-family:sans-serif;"><span class="math-chip-color" title="Math ink color" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,0.06);font-weight:500;"><span class="math-color-swatch" style="display:inline-block;width:7px;height:7px;border-radius:50%;background-color:${swatchBg};border:1px solid rgba(0,0,0,0.25);"></span>Color</span><span class="math-chip-copy" title="Copy formula (Ctrl+C)" style="cursor:pointer;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,0.06);font-weight:500;">Copy</span><span class="math-chip-edit" title="Edit formula" style="cursor:pointer;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,0.06);font-weight:500;">Edit</span></span>`;
+  const swatchBg = color || "currentColor";
+  // Chip button style uses CSS variables via a class; we avoid hardcoded rgba(0,0,0,...)
+  // because that is invisible in dark mode. We rely on .math-chip-btn class added to styles.css.
+  return `<span class="math-digital-content" style="display:inline-flex;align-items:center;vertical-align:middle;${colorStyle}">${digitalHtml}</span><span class="math-chip-actions" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;opacity:0.8;font-size:11px;font-family:sans-serif;"><span class="math-chip-color math-chip-btn" title="Math ink color" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:4px;font-weight:500;"><span class="math-color-swatch" style="display:inline-block;width:7px;height:7px;border-radius:50%;background-color:${swatchBg};border:1px solid var(--color-border);"></span>Color</span><span class="math-chip-copy math-chip-btn" title="Copy formula (Ctrl+C)" style="cursor:pointer;padding:1px 5px;border-radius:4px;font-weight:500;">Copy</span><span class="math-chip-edit math-chip-btn" title="Edit formula" style="cursor:pointer;padding:1px 5px;border-radius:4px;font-weight:500;">Edit</span></span>`;
 }
 
 function formatGraphBlockInner(definition: GraphDefinition): string {
   const title = definition.title || `${definition.type} graph`;
   const escTitle = title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return `<span style="display:inline-flex;align-items:center;gap:6px;"><span style="font-size:1.1em;">📊</span><span style="font-family:sans-serif;font-weight:600;font-size:12px;">${escTitle}</span></span><span class="graph-chip-actions" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;opacity:0.65;font-size:11px;font-family:sans-serif;"><span class="graph-chip-edit" style="cursor:pointer;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,0.06);font-weight:500;">Edit</span></span>`;
+  return `<span style="display:inline-flex;align-items:center;gap:6px;"><span style="font-size:1.1em;">📊</span><span style="font-family:sans-serif;font-weight:600;font-size:12px;">${escTitle}</span></span><span class="graph-chip-actions" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;opacity:0.65;font-size:11px;font-family:sans-serif;"><span class="graph-chip-edit math-chip-btn" style="cursor:pointer;padding:1px 5px;border-radius:4px;font-weight:500;">Edit</span></span>`;
 }
 
 export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContentEditorProps>(
@@ -548,6 +550,22 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         if (latex && (!mEl.querySelector(".math-digital-content") || !mEl.querySelector(".math-chip-color"))) {
           mEl.innerHTML = formatMathBlockInner(latex, color);
         }
+        // Migrate old blocks: add themed class, clear hardcoded inline styles
+        if (!mEl.classList.contains("math-block-themed")) {
+          mEl.classList.add("math-block-themed");
+          mEl.style.background = "";
+          mEl.style.backgroundColor = "";
+          mEl.style.color = "";
+          mEl.style.borderColor = "";
+        }
+        // Migrate old chip buttons: add math-chip-btn class
+        mEl.querySelectorAll<HTMLElement>(".math-chip-color, .math-chip-copy, .math-chip-edit").forEach((chip) => {
+          if (!chip.classList.contains("math-chip-btn")) {
+            chip.classList.add("math-chip-btn");
+            chip.style.background = "";
+            chip.style.backgroundColor = "";
+          }
+        });
       });
       const graphElements = container.querySelectorAll<HTMLElement>(".graph-block[data-graph-definition]");
       graphElements.forEach((gEl) => {
@@ -558,6 +576,13 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
             gEl.innerHTML = formatGraphBlockInner(def);
           } catch {}
         }
+        // Migrate graph chip edit buttons
+        gEl.querySelectorAll<HTMLElement>(".graph-chip-edit").forEach((chip) => {
+          if (!chip.classList.contains("math-chip-btn")) {
+            chip.classList.add("math-chip-btn");
+            chip.style.background = "";
+          }
+        });
       });
     }, []);
 
@@ -817,9 +842,9 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         const allMathBlocks = el.querySelectorAll<HTMLElement>(".math-block");
         allMathBlocks.forEach((m) => {
           m.classList.remove("math-block-selected");
-          m.style.borderColor = "rgba(99,102,241,0.25)";
+          m.style.borderColor = "";
           m.style.boxShadow = "none";
-          m.style.background = "rgba(99,102,241,0.08)";
+          m.style.background = "";
         });
 
         selectedMathElementRef.current = mathBlock;
@@ -827,9 +852,8 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
 
         if (mathBlock) {
           mathBlock.classList.add("math-block-selected");
-          mathBlock.style.borderColor = "#4f46e5";
           mathBlock.style.boxShadow = "0 0 0 2px rgba(99, 102, 241, 0.4)";
-          mathBlock.style.background = "rgba(99,102,241,0.14)";
+          mathBlock.style.background = "";
           mathBlock.focus();
 
           const latex = mathBlock.getAttribute("data-latex") ?? "";
@@ -912,9 +936,9 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         mathDiv.setAttribute("tabindex", "0");
         mathDiv.style.cssText =
           "display:inline-flex;align-items:center;gap:6px;padding:3px 10px;" +
-          "margin:4px 0;border-radius:6px;background:rgba(99,102,241,0.08);" +
-          "border:1px solid rgba(99,102,241,0.25);cursor:pointer;user-select:none;" +
-          "font-size:1em;color:#1e1b4b;vertical-align:middle;";
+          "margin:4px 0;border-radius:6px;" +
+          "cursor:pointer;user-select:none;font-size:1em;vertical-align:middle;";
+        mathDiv.className = "math-block math-block-themed";
         mathDiv.innerHTML = formatMathBlockInner(trimmed, payload.color);
 
         const createTrailingParagraph = () => {
@@ -1081,9 +1105,9 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         mathDiv.setAttribute("tabindex", "0");
         mathDiv.style.cssText =
           "display:inline-flex;align-items:center;gap:6px;padding:3px 10px;" +
-          "margin:4px 0;border-radius:6px;background:rgba(99,102,241,0.08);" +
-          "border:1px solid rgba(99,102,241,0.25);cursor:pointer;user-select:none;" +
-          "font-size:1em;color:#1e1b4b;vertical-align:middle;";
+          "margin:4px 0;border-radius:6px;" +
+          "cursor:pointer;user-select:none;font-size:1em;vertical-align:middle;";
+        mathDiv.className = "math-block math-block-themed";
         mathDiv.innerHTML = formatMathBlockInner(trimmed);
 
         const createTrailingParagraph = () => {
@@ -1941,7 +1965,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
             paddingLeft: isMarginEnabled ? `${marginWidth + 18}px` : undefined,
           }}
           className={cn(
-            "min-h-0 flex-1 rounded-lg border border-input bg-card p-4 text-base leading-relaxed text-foreground outline-none transition-colors cursor-text",
+            "min-h-0 flex-1 rounded-lg border border-input bg-card p-4 text-base leading-relaxed text-foreground outline-none transition-colors cursor-text caret-foreground",
             "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
             "overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]",
             isMarginEnabled && "rich-editor-gutter-surface",

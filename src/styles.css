@@ -153,4 +153,44 @@
   color: #34d399;
 }
 
+/* ─── Math block: theme-aware colors (replaces hardcoded inline rgba) ───── */
+.math-block-themed {
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  color: var(--color-foreground);
+}
 
+.dark .math-block-themed {
+  background: rgba(129, 140, 248, 0.14);
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  color: var(--color-foreground);
+}
+
+.math-block-themed.math-block-selected {
+  border-color: #818cf8;
+  background: rgba(99, 102, 241, 0.18);
+}
+
+.dark .math-block-themed.math-block-selected {
+  border-color: #a5b4fc;
+  background: rgba(129, 140, 248, 0.25);
+}
+
+/* Math chip action buttons (Color / Copy / Edit) */
+.math-chip-btn {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--color-foreground);
+}
+
+.dark .math-chip-btn {
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--color-foreground);
+}
+
+.math-chip-btn:hover {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.dark .math-chip-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
