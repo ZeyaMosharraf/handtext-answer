@@ -587,6 +587,53 @@ export function writingArea(settings: HandwritingSettings, pageNumber = 1, total
   };
 }
 
+function renderPlacementMarginMarker(
+  ctx: CanvasRenderingContext2D,
+  marginMarker: NonNullable<LayoutPage["placements"][number]["marginMarker"]>,
+  coordinates: PageCoordinateSystem,
+  lineIndex: number,
+  settings: HandwritingSettings,
+  random: () => number,
+  defaultInk: string,
+  baseScale: number = 1.0,
+) {
+  const text = marginMarker.text.trim();
+  if (!text) return;
+
+  const markerBaselineY = getBaseline(coordinates, lineIndex);
+  const marginBoundary =
+    coordinates.marginRuleX && coordinates.marginRuleX > 0
+      ? coordinates.marginRuleX
+      : (coordinates.contentLeft > 36 ? coordinates.contentLeft : 80);
+
+  // Leave safety buffer before the vertical red rule (at least 8px padding)
+  const maxRightX = marginBoundary - 8;
+  const markerX = Math.min(coordinates.marginMarkerLeft ?? 20, maxRightX - 24);
+  const availableWidth = Math.max(20, maxRightX - markerX);
+
+  const markerColor = marginMarker.color || defaultInk;
+  let scale = baseScale;
+
+  const currentSize = settings.fontSize * scale;
+  const textWidth = measureHandwritten(ctx, text, settings, currentSize);
+  if (textWidth > availableWidth) {
+    scale = scale * (availableWidth / textWidth);
+  }
+
+  writeSegments(
+    ctx,
+    plainSegments(text),
+    settings,
+    markerX,
+    markerBaselineY,
+    random,
+    {
+      size: settings.fontSize * scale,
+      color: markerColor,
+    },
+  );
+}
+
 /**
  * Renders a single page directly into an existing canvas element for immediate interactive display.
  * Avoids toDataURL and image decoding overhead to achieve instantaneous 60fps responsiveness.
@@ -641,23 +688,18 @@ export async function renderPageToCanvas(
   for (const placement of page.placements) {
     // ── Draw handwritten question / margin marker (e.g. Q1, Ans, a), etc.) in left gutter ──
     if (placement.marginMarker && placement.marginMarker.text.trim()) {
-      const markerBaselineY = getBaseline(page.coordinates, placement.lineIndex);
-      const markerX = page.coordinates.marginMarkerLeft ?? 28;
-      const markerColor = placement.marginMarker.color || ink;
       const scale = "scale" in placement && typeof (placement as any).scale === "number"
         ? (placement as any).scale
         : 1.0;
-      writeSegments(
+      renderPlacementMarginMarker(
         ctx,
-        plainSegments(placement.marginMarker.text),
+        placement.marginMarker,
+        page.coordinates,
+        placement.lineIndex,
         input.settings,
-        markerX,
-        markerBaselineY,
         random,
-        {
-          size: input.settings.fontSize * scale,
-          color: markerColor,
-        },
+        ink,
+        scale,
       );
     }
 
@@ -754,23 +796,18 @@ export async function renderPages(
     for (const placement of page.placements) {
       // ── Draw handwritten question / margin marker (e.g. Q1, Ans, a), etc.) in left gutter ──
       if (placement.marginMarker && placement.marginMarker.text.trim()) {
-        const markerBaselineY = getBaseline(page.coordinates, placement.lineIndex);
-        const markerX = page.coordinates.marginMarkerLeft ?? 28;
-        const markerColor = placement.marginMarker.color || ink;
         const scale = "scale" in placement && typeof (placement as any).scale === "number"
           ? (placement as any).scale
           : 1.0;
-        writeSegments(
+        renderPlacementMarginMarker(
           ctx,
-          plainSegments(placement.marginMarker.text),
+          placement.marginMarker,
+          page.coordinates,
+          placement.lineIndex,
           input.settings,
-          markerX,
-          markerBaselineY,
           random,
-          {
-            size: input.settings.fontSize * scale,
-            color: markerColor,
-          },
+          ink,
+          scale,
         );
       }
 

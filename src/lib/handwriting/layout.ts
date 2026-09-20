@@ -403,7 +403,7 @@ function activeCoordinateSystem(
   const contentRight = w - Math.max(48, settings.marginRight);
 
   // Position for question/answer margin markers (in the left gutter)
-  const marginMarkerLeft = marginRuleX > 0 ? Math.max(16, marginRuleX - 68) : 24;
+  const marginMarkerLeft = marginRuleX > 0 ? Math.max(16, Math.min(22, Math.round(marginRuleX * 0.2))) : 20;
 
   // When header is active: writing starts on the first ruled line below the header boundary.
   // When header is inactive: writing starts at the top margin aligned to ruling intervals.

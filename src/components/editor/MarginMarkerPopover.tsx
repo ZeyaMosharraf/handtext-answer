@@ -1,4 +1,4 @@
-﻿/**
+/**
  * src/components/editor/MarginMarkerPopover.tsx
  *
  * Compact, fast popover for selecting, customizing, editing, or removing
@@ -103,16 +103,28 @@ export function MarginMarkerPopover({
   if (left < padding) left = padding;
   if (top + popoverHeight > window.innerHeight - padding) top = Math.max(padding, anchorRect.top - popoverHeight - 6);
 
-  const applyMarker = (type: MarginMarkerType, text: string) => {
+  const handleColorSelect = (colorValue: string) => {
+    setSelectedColor(colorValue);
+    if (currentMarker) {
+      onSelectMarker({
+        ...currentMarker,
+        color: colorValue || undefined,
+      });
+    }
+  };
+
+  const applyMarker = (type: MarginMarkerType, text: string, andClose: boolean = false) => {
     onSelectMarker({ type, text, ...(selectedColor ? { color: selectedColor } : {}) });
-    onClose();
+    if (andClose) {
+      onClose();
+    }
   };
 
   const handleApplyCustom = (e?: React.FormEvent) => {
     e?.preventDefault();
     const trimmed = customText.trim();
     if (!trimmed) return;
-    applyMarker("custom", trimmed);
+    applyMarker("custom", trimmed, true);
   };
 
   return (
@@ -299,10 +311,10 @@ export function MarginMarkerPopover({
               key={c.value || "default"}
               type="button"
               title={c.label}
-              onClick={() => setSelectedColor(c.value)}
+              onClick={() => handleColorSelect(c.value)}
               className={cn(
                 "size-5 rounded-full border-2 transition-transform hover:scale-110 cursor-pointer",
-                selectedColor === c.value ? "border-foreground scale-110" : "border-transparent"
+                selectedColor === c.value ? "border-foreground scale-110 shadow-xs" : "border-transparent"
               )}
               style={
                 c.value
@@ -319,7 +331,7 @@ export function MarginMarkerPopover({
             <input
               type="color"
               value={selectedColor || "#1d4ed8"}
-              onChange={(e) => setSelectedColor(e.target.value)}
+              onChange={(e) => handleColorSelect(e.target.value)}
               className="opacity-0 absolute inset-0 size-full cursor-pointer"
             />
             <span className="text-[8px] leading-none text-muted-foreground select-none pointer-events-none">+</span>
@@ -329,23 +341,31 @@ export function MarginMarkerPopover({
           <div className="flex items-center gap-1.5">
             <span className="inline-block size-3 rounded-full border border-border/60" style={{ backgroundColor: selectedColor }} />
             <span className="text-[10px] text-muted-foreground font-mono">{selectedColor}</span>
-            <button type="button" onClick={() => setSelectedColor("")} className="text-[10px] text-muted-foreground hover:text-foreground ml-1 cursor-pointer underline underline-offset-2">reset</button>
+            <button type="button" onClick={() => handleColorSelect("")} className="text-[10px] text-muted-foreground hover:text-foreground ml-1 cursor-pointer underline underline-offset-2">reset</button>
           </div>
         )}
       </div>
 
-      {currentMarker && (
-        <div className="mt-2.5 border-t border-border/60 pt-2 flex justify-between items-center">
+      <div className="mt-3 border-t border-border/60 pt-2.5 flex items-center justify-between gap-2">
+        {currentMarker ? (
           <button
             type="button"
             onClick={() => { onRemoveMarker(); onClose(); }}
             className="text-[11px] font-medium text-destructive hover:bg-destructive/10 rounded px-2 py-1 transition-colors cursor-pointer flex items-center gap-1"
           >
-            <span>Remove Marker</span>
+            <span>Remove</span>
           </button>
-          <span className="text-[10px] text-muted-foreground">Clears label from block</span>
-        </div>
-      )}
+        ) : (
+          <span className="text-[10px] text-muted-foreground">Select marker above</span>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md bg-primary text-primary-foreground px-3 py-1 text-xs font-semibold hover:bg-primary/90 transition-colors cursor-pointer ml-auto"
+        >
+          Done
+        </button>
+      </div>
     </div>
   );
 }

@@ -276,24 +276,39 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         return;
       }
       const items: GutterMarkerItem[] = [];
+      const markedNodes = Array.from(el.querySelectorAll<HTMLElement>("[data-margin-marker]"));
       const children = Array.from(el.children) as HTMLElement[];
+      const seen = new Set<HTMLElement>();
+
+      const register = (node: HTMLElement, idx: number) => {
+        if (seen.has(node)) return;
+        seen.add(node);
+        const markerText = node.getAttribute("data-margin-marker");
+        if (!markerText) return;
+        const type = (node.getAttribute("data-margin-type") as MarginMarkerType) || "custom";
+        const color = node.getAttribute("data-margin-color") || undefined;
+        let topBlock: HTMLElement = node;
+        while (topBlock.parentElement && topBlock.parentElement !== el) {
+          topBlock = topBlock.parentElement;
+        }
+        items.push({
+          id: `marker-${idx}-${markerText}`,
+          block: node,
+          top: topBlock.offsetTop,
+          height: topBlock.offsetHeight,
+          text: markerText,
+          type,
+          color,
+        });
+      };
+
+      for (let i = 0; i < markedNodes.length; i++) {
+        const node = markedNodes[i];
+        if (node) register(node, i);
+      }
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
-        if (!child) continue;
-        const markerText = child.getAttribute("data-margin-marker");
-        if (markerText) {
-          const type = (child.getAttribute("data-margin-type") as MarginMarkerType) || "custom";
-          const color = child.getAttribute("data-margin-color") || undefined;
-          items.push({
-            id: `marker-${i}`,
-            block: child,
-            top: child.offsetTop,
-            height: child.offsetHeight,
-            text: markerText,
-            type,
-            color,
-          });
-        }
+        if (child) register(child, items.length + i);
       }
       setGutterMarkers(items);
     }, [isMarginEnabled]);
@@ -1856,8 +1871,8 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
                     ...(item.color
                       ? {
                           color: item.color,
-                          backgroundColor: `color-mix(in srgb, ${item.color} 12%, transparent)`,
-                          borderColor: `color-mix(in srgb, ${item.color} 30%, transparent)`,
+                          backgroundColor: `color-mix(in srgb, ${item.color} 14%, transparent)`,
+                          borderColor: `color-mix(in srgb, ${item.color} 35%, transparent)`,
                         }
                       : {}),
                   }}
@@ -1867,11 +1882,11 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
                   }}
                   className={cn(
                     "px-1.5 rounded text-xs font-semibold truncate cursor-pointer transition-all border select-none",
-                    !item.color && item.type === "question" && "text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/20 font-bold",
-                    !item.color && item.type === "answer" && "text-slate-900 dark:text-slate-100 bg-slate-500/10 border-slate-500/20 italic font-bold",
-                    !item.color && item.type === "subquestion" && "text-blue-600 dark:text-blue-300 bg-blue-500/10 border-blue-500/20",
-                    !item.color && item.type === "marks" && "text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/20",
-                    !item.color && item.type === "custom" && "text-muted-foreground bg-muted border-border",
+                    !item.color && item.type === "question" && "text-foreground bg-muted/80 border-border font-bold",
+                    !item.color && item.type === "answer" && "text-foreground/90 bg-muted/50 border-border/80 italic font-bold",
+                    !item.color && item.type === "subquestion" && "text-foreground/85 bg-muted/40 border-border/60 font-semibold",
+                    !item.color && item.type === "marks" && "text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-500/20 font-semibold",
+                    !item.color && item.type === "custom" && "text-muted-foreground bg-muted/40 border-border font-medium",
                     "hover:brightness-95 dark:hover:brightness-110 hover:scale-105 shadow-xs",
                   )}
                   title={`${item.text} (${item.type}) - Click to edit`}
