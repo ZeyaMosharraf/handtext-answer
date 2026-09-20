@@ -1,5 +1,6 @@
 import type { ColumnAlignment } from "./types";
 import type { GraphDefinition } from "../graph/types";
+import type { MarginMarker, MarginMarkerType } from "@/types/document";
 
 export type BlockKind =
   | "heading"
@@ -160,6 +161,8 @@ export interface Block {
   math?: MathBlockData;
   /** Present when kind === "graph" */
   graph?: GraphBlockData;
+  /** Answer-sheet gutter margin marker (e.g. Q1, Ans, a), 5M) */
+  marginMarker?: MarginMarker | undefined;
 }
 
 export const HIGHLIGHT_COLOR = "#141821"; // strong black ink for emphasis
@@ -359,6 +362,23 @@ export function parseInlineHtml(innerHtml: string): Seg[] {
   return merged.length ? merged : [{ text: "", bold: false, underline: false, italic: false }];
 }
 
+function extractMarginMarker(attrs: string): MarginMarker | undefined {
+  const textMatch = attrs.match(/data-margin-marker=["']([^"']*)["']/i);
+  if (!textMatch || !textMatch[1]) return undefined;
+  const typeMatch = attrs.match(/data-margin-type=["']([^"']*)["']/i);
+  const colorMatch = attrs.match(/data-margin-color=["']([^"']*)["']/i);
+  const validTypes: MarginMarkerType[] = ["question", "answer", "subquestion", "marks", "custom"];
+  const rawType = typeMatch?.[1] || "custom";
+  const type: MarginMarkerType = validTypes.includes(rawType as MarginMarkerType)
+    ? (rawType as MarginMarkerType)
+    : "custom";
+  return {
+    type,
+    text: unescapeHtml(textMatch[1]),
+    ...(colorMatch?.[1] ? { color: unescapeHtml(colorMatch[1]) } : {}),
+  };
+}
+
 function stripTextBlockWrappers(html: string): string {
   let res = html;
   const openRe = /<div[^>]*data-block-type=["']text["'][^>]*>/gi;
@@ -366,6 +386,7 @@ function stripTextBlockWrappers(html: string): string {
   while ((match = openRe.exec(res)) !== null) {
     const startIdx = match.index;
     const tagLen = match[0].length;
+    const openTag = match[0];
     let depth = 1;
     let cursor = startIdx + tagLen;
     const innerTagRe = /<\/?div\b[^>]*>/gi;
@@ -386,7 +407,16 @@ function stripTextBlockWrappers(html: string): string {
       }
     }
     if (endIdx !== -1) {
-      const innerContent = res.slice(startIdx + tagLen, endIdx);
+      let innerContent = res.slice(startIdx + tagLen, endIdx);
+      const markerMatch = openTag.match(/data-margin-marker=["']([^"']*)["']/i);
+      const typeMatch = openTag.match(/data-margin-type=["']([^"']*)["']/i);
+      const colorMatch = openTag.match(/data-margin-color=["']([^"']*)["']/i);
+      if (markerMatch && !innerContent.includes("data-margin-marker")) {
+        const markerAttrs = ` data-margin-marker="${markerMatch[1]}"` +
+          (typeMatch ? ` data-margin-type="${typeMatch[1]}"` : "") +
+          (colorMatch ? ` data-margin-color="${colorMatch[1]}"` : "");
+        innerContent = innerContent.replace(/<([a-z0-9]+)([^>]*)>/i, `<$1$2${markerAttrs}>`);
+      }
       res = res.slice(0, startIdx) + "\n" + innerContent + "\n" + res.slice(endIdx + closeLen);
       openRe.lastIndex = startIdx;
     } else {
@@ -410,6 +440,18 @@ export function parseHtmlContent(
   // Unwrap any top-level text block container divs so nested div boundaries never truncate regex
   const unwrappedHtml = stripTextBlockWrappers(html);
 
+  function extractMarkerAttributesString(tagStr: string): string {
+    const markerMatch = tagStr.match(/data-margin-marker=["']([^"']*)["']/i);
+    if (!markerMatch || !markerMatch[1]) return "";
+    const typeMatch = tagStr.match(/data-margin-type=["']([^"']*)["']/i);
+    const colorMatch = tagStr.match(/data-margin-color=["']([^"']*)["']/i);
+    return (
+      ` data-margin-marker="${markerMatch[1]}"` +
+      (typeMatch?.[1] ? ` data-margin-type="${typeMatch[1]}"` : "") +
+      (colorMatch?.[1] ? ` data-margin-color="${colorMatch[1]}"` : "")
+    );
+  }
+
   // Pre-extract math blocks so nested <div> wrappers in contenteditable never truncate blockRegex
   let mathCounter = mathBlocksMap.size;
   let tokenizedHtml = unwrappedHtml.replace(
@@ -418,21 +460,23 @@ export function parseHtmlContent(
       const latex = unescapeHtml(latex1 || latex2 || "");
       const colorMatch = fullMatch.match(/data-color=["']([^"']*)["']/i);
       const color = colorMatch ? unescapeHtml(colorMatch[1] ?? "") : undefined;
+      const markerAttrs = extractMarkerAttributesString(fullMatch);
       const token = `__MATH_BLOCK_TOKEN_${mathCounter++}__`;
       mathBlocksMap.set(token, { latex, color });
-      return `<p data-math-token="${token}"></p>`;
+      return `<p data-math-token="${token}"${markerAttrs}></p>`;
     },
   );
 
   // Pre-extract graph blocks
   let graphCounter = graphBlocksMap.size;
   tokenizedHtml = tokenizedHtml.replace(
-    /<div[^>]*?(?:class=["'][^"']*graph-block[^"']*["']|data-block-type=["']graph["'])[^>]*data-graph-definition=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>|<div[^>]*data-graph-definition=["']([^"']*)["'][^>]*?(?:class=["'][^"']*graph-block[^"']*["']|data-block-type=["']graph["'])[^>]*>[\s\S]*?<\/div>/gi,
-    (_, def1, def2) => {
+    /<div[^>]*?(?:class=["'][^"']*graph-block[^"']*["']|data-block-type=["']graph["'])[^>]*data-graph-definition=(["'])([\s\S]*?)\1[^>]*>[\s\S]*?<\/div>|<div[^>]*data-graph-definition=(["'])([\s\S]*?)\3[^>]*?(?:class=["'][^"']*graph-block[^"']*["']|data-block-type=["']graph["'])[^>]*>[\s\S]*?<\/div>/gi,
+    (fullMatch, _q1, def1, _q2, def2) => {
       const defStr = unescapeHtml(def1 || def2 || "");
+      const markerAttrs = extractMarkerAttributesString(fullMatch);
       const token = `__GRAPH_BLOCK_TOKEN_${graphCounter++}__`;
       graphBlocksMap.set(token, defStr);
-      return `<p data-graph-token="${token}"></p>`;
+      return `<p data-graph-token="${token}"${markerAttrs}></p>`;
     },
   );
 
@@ -459,6 +503,7 @@ export function parseHtmlContent(
     const tag = (match[1] ?? "hr").toLowerCase();
     const attrs = match[2] ?? "";
     const inner = match[3] ?? "";
+    const marginMarker = extractMarginMarker(attrs);
 
     // Check if the block tag itself is a math-block token or container
     const tokenMatch = attrs.match(/data-math-token=["']([^"']*)["']/i);
@@ -470,6 +515,7 @@ export function parseHtmlContent(
           kind: "math",
           text: latex,
           math: { latex, display: "block", ...(data.color ? { color: data.color } : {}) },
+          ...(marginMarker ? { marginMarker } : {}),
         });
       }
       continue;
@@ -484,6 +530,7 @@ export function parseHtmlContent(
         kind: "math",
         text: latex,
         math: { latex, display: "block", ...(color ? { color } : {}) },
+        ...(marginMarker ? { marginMarker } : {}),
       });
       continue;
     }
@@ -494,7 +541,15 @@ export function parseHtmlContent(
       const defStr = graphBlocksMap.get(graphTokenMatch[1]!)!;
       try {
         const definition = JSON.parse(defStr) as GraphDefinition;
-        blocks.push({ kind: "graph", text: defStr, graph: { definition } });
+        if (!definition.space) {
+          definition.space = { xMin: -5, xMax: 5, yMin: -5, yMax: 5, showGrid: true, showAxisLabels: true, originVisible: true };
+        }
+        blocks.push({
+          kind: "graph",
+          text: defStr,
+          graph: { definition },
+          ...(marginMarker ? { marginMarker } : {}),
+        });
       } catch {
         // Silently skip corrupted JSON
       }
@@ -506,7 +561,15 @@ export function parseHtmlContent(
       const defStr = graphAttrMatch ? unescapeHtml(graphAttrMatch[1] ?? "") : inner.trim();
       try {
         const definition = JSON.parse(defStr) as GraphDefinition;
-        blocks.push({ kind: "graph", text: defStr, graph: { definition } });
+        if (!definition.space) {
+          definition.space = { xMin: -5, xMax: 5, yMin: -5, yMax: 5, showGrid: true, showAxisLabels: true, originVisible: true };
+        }
+        blocks.push({
+          kind: "graph",
+          text: defStr,
+          graph: { definition },
+          ...(marginMarker ? { marginMarker } : {}),
+        });
       } catch {
         // Silently skip corrupted JSON
       }
@@ -520,19 +583,19 @@ export function parseHtmlContent(
 
     if (tag === "h1") {
       const segs = parseInlineHtml(inner);
-      blocks.push({ kind: "heading", text: segText(segs), segs });
+      blocks.push({ kind: "heading", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
       continue;
     }
 
     if (tag === "h2" || tag === "h3" || tag === "h4") {
       const segs = parseInlineHtml(inner);
-      blocks.push({ kind: "subheading", text: segText(segs), segs });
+      blocks.push({ kind: "subheading", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
       continue;
     }
 
     if (tag === "blockquote") {
       const segs = parseInlineHtml(inner);
-      blocks.push({ kind: "quote", text: segText(segs), segs });
+      blocks.push({ kind: "quote", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
       continue;
     }
 
@@ -616,7 +679,7 @@ export function parseHtmlContent(
       }
 
       if (rows.length > 0) {
-        blocks.push({ kind: "table", text: "", table: { rows, headerRow, alignments } });
+        blocks.push({ kind: "table", text: "", table: { rows, headerRow, alignments }, ...(marginMarker ? { marginMarker } : {}) });
       }
       continue;
     }
@@ -627,7 +690,7 @@ export function parseHtmlContent(
         ?? inner.match(/data-latex=["']([^"']*)["']/i);
       const latex = latexMatch ? latexMatch[1]! : "";
       if (latex.trim()) {
-        blocks.push({ kind: "math", text: latex, math: { latex, display: "block" } });
+        blocks.push({ kind: "math", text: latex, math: { latex, display: "block" }, ...(marginMarker ? { marginMarker } : {}) });
       }
       continue;
     }
@@ -708,6 +771,9 @@ export function parseHtmlContent(
           if (defStr) {
             try {
               const definition = JSON.parse(defStr) as GraphDefinition;
+              if (!definition.space) {
+                definition.space = { xMin: -5, xMax: 5, yMin: -5, yMax: 5, showGrid: true, showAxisLabels: true, originVisible: true };
+              }
               blocks.push({ kind: "graph", text: defStr, graph: { definition } });
             } catch {
               // Silently skip corrupted JSON
@@ -734,7 +800,7 @@ export function parseHtmlContent(
       if (!text) {
         blocks.push({ kind: "blank", text: "" });
       } else {
-        blocks.push({ kind: "paragraph", text: segText(segs), segs });
+        blocks.push({ kind: "paragraph", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
       }
       continue;
     }

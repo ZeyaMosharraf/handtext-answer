@@ -64,6 +64,24 @@ is rendered on the right. Complex interaction model requiring careful layout eng
 
 ---
 
+### Phase M2-P4 — Answer-Sheet Layout / Question Margin System
+
+**Status:** 🚀 Phase 2 Complete (Editor UX & Gutter Markers Verified) — Phase 3 Ready
+
+**Goal:** Dedicated handwritten examination booklet margin column for question numbers (`Q1`, `Q2`),
+answer identifiers (`Ans`), sub-questions (`a)`, `b)`), and marks (`[5M]`), co-aligned on the first
+baseline of the answer with full multi-page support and gutter chip editor UX.
+
+**Artifacts:**
+- [RESEARCH.md](phases/answer-margin/RESEARCH.md)
+- [CONTEXT.md](phases/answer-margin/CONTEXT.md)
+- [ARCHITECTURE.md](phases/answer-margin/ARCHITECTURE.md)
+- [PLAN.md](phases/answer-margin/PLAN.md)
+- [UAT-PHASE-1.md](phases/answer-margin/UAT-PHASE-1.md)
+- [UAT-PHASE-2.md](phases/answer-margin/UAT-PHASE-2.md)
+
+---
+
 ## Future Phases (Backlog)
 
 - Export improvements (PDF bookmarks, multi-document batch)

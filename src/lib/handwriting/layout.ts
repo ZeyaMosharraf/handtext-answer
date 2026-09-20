@@ -1,4 +1,5 @@
 import { parseContent, getTableCellText, getTableCellSegs, segText, type Block, type BlockKind, type Seg, type TableCellData } from "./parse";
+import type { MarginMarker } from "@/types/document";
 import {
   formatPageNumber,
   pageDimensions,
@@ -23,6 +24,8 @@ export interface PageCoordinateSystem {
   baselineOffset: number;
   headerHeight: number;
   footerHeight: number;
+  marginRuleX?: number;
+  marginMarkerLeft?: number;
 }
 
 export interface LayoutCellLine {
@@ -39,6 +42,7 @@ export interface LayoutLine {
   indent: number;
   scale: number;
   underline: boolean;
+  marginMarker?: MarginMarker | undefined;
 }
 
 export interface LayoutTableRow {
@@ -52,6 +56,7 @@ export interface LayoutTableRow {
   cells: LayoutCellLine[][];
   columnWidths: number[];
   alignments?: ColumnAlignment[];
+  marginMarker?: MarginMarker | undefined;
 }
 
 export interface LayoutMathBlock {
@@ -60,6 +65,7 @@ export interface LayoutMathBlock {
   lineUnits: number;
   latex: string;
   color?: string | undefined;
+  marginMarker?: MarginMarker | undefined;
 }
 
 export interface LayoutGraphBlock {
@@ -67,6 +73,7 @@ export interface LayoutGraphBlock {
   lineIndex: number;
   lineUnits: number;
   definition: GraphDefinition;
+  marginMarker?: MarginMarker | undefined;
 }
 
 export interface LayoutTableBounds {
@@ -98,6 +105,7 @@ interface FlowLine {
   scale: number;
   underline: boolean;
   gapLines: number;
+  marginMarker?: MarginMarker | undefined;
 }
 
 interface FlowTableRow {
@@ -111,6 +119,7 @@ interface FlowTableRow {
   alignments?: ColumnAlignment[];
   lineUnits: number;
   gapLines: number;
+  marginMarker?: MarginMarker | undefined;
 }
 
 interface FlowMathBlock {
@@ -119,6 +128,7 @@ interface FlowMathBlock {
   lineUnits: number;
   gapLines: number;
   color?: string | undefined;
+  marginMarker?: MarginMarker | undefined;
 }
 
 interface FlowGraphBlock {
@@ -126,6 +136,7 @@ interface FlowGraphBlock {
   definition: GraphDefinition;
   lineUnits: number;
   gapLines: number;
+  marginMarker?: MarginMarker | undefined;
 }
 
 type FlowItem = FlowLine | FlowTableRow | FlowMathBlock | FlowGraphBlock;
@@ -383,9 +394,16 @@ function activeCoordinateSystem(
   const footerHeight = rawFooterHeight > 0 ? Math.max(1, Math.round(rawFooterHeight / rulingSpacing)) * rulingSpacing : 0;
 
   // Margin rule alignment
-  const marginRuleRight = settings.page.margin.enabled ? settings.page.margin.position + 24 : 48;
+  const isAnswerMarginEnabled = settings.page.answerMargin?.enabled ?? true;
+  const marginRuleX = settings.page.margin.enabled
+    ? settings.page.margin.position
+    : (isAnswerMarginEnabled && (settings.page.answerMargin?.showDivider !== false) ? 100 : 0);
+  const marginRuleRight = marginRuleX > 0 ? marginRuleX + 24 : 48;
   const contentLeft = Math.max(settings.marginLeft, marginRuleRight);
   const contentRight = w - Math.max(48, settings.marginRight);
+
+  // Position for question/answer margin markers (in the left gutter)
+  const marginMarkerLeft = marginRuleX > 0 ? Math.max(16, marginRuleX - 68) : 24;
 
   // When header is active: writing starts on the first ruled line below the header boundary.
   // When header is inactive: writing starts at the top margin aligned to ruling intervals.
@@ -410,6 +428,8 @@ function activeCoordinateSystem(
     baselineOffset: 0,
     headerHeight,
     footerHeight,
+    marginRuleX,
+    marginMarkerLeft,
   };
 }
 
@@ -677,6 +697,10 @@ function buildFlow(
       ? graphFlowBlock(block, settings)
       : blockLines(ctx, block, settings, contentWidth);
     if (laid.length === 0) continue;
+    // Start-page only: bind block.marginMarker to the first flow item only
+    if (block.marginMarker) {
+      laid[0]!.marginMarker = block.marginMarker;
+    }
     // Notebook tables begin one rule above their first text baseline (top = lineIndex - 1).
     // When following other content, guarantee at least 1 gap line so the top border
     // never collides with or overlaps the preceding text line.
@@ -768,6 +792,7 @@ function paginate(
         indent: item.indent,
         scale: item.scale,
         underline: item.underline,
+        ...(item.marginMarker ? { marginMarker: item.marginMarker } : {}),
       });
     } else if (item.type === "mathBlock") {
       placements.push({
@@ -776,11 +801,22 @@ function paginate(
         lineUnits: item.lineUnits,
         latex: item.latex,
         ...(item.color ? { color: item.color } : {}),
+        ...(item.marginMarker ? { marginMarker: item.marginMarker } : {}),
       });
     } else if (item.type === "graphBlock") {
-      placements.push({ type: "graphBlock", lineIndex, lineUnits: item.lineUnits, definition: item.definition });
+      placements.push({
+        type: "graphBlock",
+        lineIndex,
+        lineUnits: item.lineUnits,
+        definition: item.definition,
+        ...(item.marginMarker ? { marginMarker: item.marginMarker } : {}),
+      });
     } else {
-      placements.push({ ...item, lineIndex });
+      placements.push({
+        ...item,
+        lineIndex,
+        ...(item.marginMarker ? { marginMarker: item.marginMarker } : {}),
+      });
     }
     currentLineIndex = Math.min(capacity, lineIndex + units);
   }

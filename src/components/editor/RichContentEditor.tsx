@@ -31,7 +31,9 @@ import {
 import type { GraphDefinition } from "@/lib/graph/types";
 import { renderDigitalMathToHtml } from "@/lib/math/digitalRenderer";
 import { cn } from "@/lib/utils";
-import { generateBlockId } from "@/types/document";
+import { generateBlockId, type MarginMarker, type MarginMarkerType } from "@/types/document";
+import type { AnswerMarginConfig } from "@/lib/handwriting/types";
+import { MarginMarkerPopover } from "./MarginMarkerPopover";
 import {
   serializeMathBlockToClipboard,
   deserializeMathBlockFromClipboard,
@@ -93,6 +95,7 @@ interface RichContentEditorProps {
   onFormatChange?: ((state: FormatState) => void) | undefined;
   onMathBlockClick?: ((latex: string, element: HTMLElement) => void) | undefined;
   onGraphBlockClick?: ((definition: GraphDefinition, blockId: string) => void) | undefined;
+  answerMargin?: AnswerMarginConfig | undefined;
 }
 
 function rgbToHex(rgbStr: string): string | null {
@@ -106,12 +109,90 @@ function rgbToHex(rgbStr: string): string | null {
 
 function sanitizeForEditor(rawHtml: string): string {
   if (!rawHtml) return "<p><br></p>";
-  // Strip top-level text block wrappers if present from hybrid serialization
-  let clean = rawHtml.replace(/<div\s+[^>]*data-block-type=["']text["'][^>]*>([\s\S]*?)<\/div>/gi, "$1");
+  // Strip top-level text block wrappers if present from hybrid serialization,
+  // while preserving any data-margin-marker attributes onto the inner child element
+  let clean = rawHtml.replace(
+    /<div\s+([^>]*data-block-type=["']text["'][^>]*)>([\s\S]*?)<\/div>/gi,
+    (match, attrs, inner) => {
+      const markerMatch = attrs.match(/data-margin-marker=["']([^"']*)["']/i);
+      const typeMatch = attrs.match(/data-margin-type=["']([^"']*)["']/i);
+      const colorMatch = attrs.match(/data-margin-color=["']([^"']*)["']/i);
+
+      if (markerMatch && !inner.includes("data-margin-marker")) {
+        const markerAttrs =
+          ` data-margin-marker="${markerMatch[1]}"` +
+          (typeMatch ? ` data-margin-type="${typeMatch[1]}"` : "") +
+          (colorMatch ? ` data-margin-color="${colorMatch[1]}"` : "");
+        return inner.replace(/<([a-z0-9]+)([^>]*)>/i, `<$1$2${markerAttrs}>`);
+      }
+      return inner;
+    }
+  );
   while (/^<div[^>]*data-block-type=["']text["'][^>]*>([\s\S]*)<\/div>$/i.test(clean.trim())) {
     clean = clean.trim().replace(/^<div[^>]*data-block-type=["']text["'][^>]*>/i, "").replace(/<\/div>$/i, "");
   }
   return clean || "<p><br></p>";
+}
+
+function findTopLevelBlockAtY(editor: HTMLElement, clientY: number): HTMLElement | null {
+  const children = Array.from(editor.children) as HTMLElement[];
+  for (const child of children) {
+    const rect = child.getBoundingClientRect();
+    if (clientY >= rect.top && clientY <= rect.bottom) {
+      return child;
+    }
+  }
+  if (children.length > 0) {
+    const firstChild = children[0];
+    if (firstChild) {
+      const firstRect = firstChild.getBoundingClientRect();
+      if (clientY < firstRect.top) return firstChild;
+    }
+    const lastChild = children[children.length - 1];
+    if (lastChild) {
+      const lastRect = lastChild.getBoundingClientRect();
+      if (clientY > lastRect.bottom) return lastChild;
+    }
+  }
+  return null;
+}
+
+function computeSuggestedMarkers(editor: HTMLElement): { question: string; subquestion: string } {
+  const markedEls = editor.querySelectorAll("[data-margin-marker]");
+  let maxQ = 0;
+  let lastSub = "";
+
+  markedEls.forEach((el) => {
+    const text = el.getAttribute("data-margin-marker") || "";
+    const type = el.getAttribute("data-margin-type") || "";
+
+    const qMatch = text.match(/^Q(\d+)$/i);
+    if (qMatch && qMatch[1]) {
+      const n = parseInt(qMatch[1], 10);
+      if (n > maxQ) maxQ = n;
+    }
+
+    if (type === "subquestion" || /^[a-z]\)$/i.test(text) || /^\([ivx]+\)$/i.test(text)) {
+      lastSub = text.trim();
+    }
+  });
+
+  const nextQ = `Q${maxQ + 1}`;
+
+  let nextSub = "a)";
+  if (/^[a-z]\)$/i.test(lastSub) && lastSub.length > 0) {
+    const charCode = lastSub.charCodeAt(0);
+    if (charCode >= 97 && charCode < 122) {
+      nextSub = `${String.fromCharCode(charCode + 1)})`;
+    }
+  } else if (/^\(i+\)$/i.test(lastSub)) {
+    if (lastSub === "(i)") nextSub = "(ii)";
+    else if (lastSub === "(ii)") nextSub = "(iii)";
+    else if (lastSub === "(iii)") nextSub = "(iv)";
+    else if (lastSub === "(iv)") nextSub = "(v)";
+  }
+
+  return { question: nextQ, subquestion: nextSub };
 }
 
 export const MATH_INK_COLORS = [
@@ -137,8 +218,9 @@ function formatGraphBlockInner(definition: GraphDefinition): string {
 }
 
 export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContentEditorProps>(
-  ({ value, onChange, placeholder, className, onFormatChange, onMathBlockClick, onGraphBlockClick }, ref) => {
+  ({ value, onChange, placeholder, className, onFormatChange, onMathBlockClick, onGraphBlockClick, answerMargin }, ref) => {
     const editorRef = useRef<HTMLDivElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
     const lastValueRef = useRef<string>("");
     const isInternalChangeRef = useRef(false);
     const savedRangeRef = useRef<Range | null>(null);
@@ -157,6 +239,121 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       left: number;
       currentColor: string | undefined;
     } | null>(null);
+
+    const [markerPopover, setMarkerPopover] = useState<{
+      targetBlock: HTMLElement;
+      rect: { top: number; left: number; bottom: number; height: number };
+      currentMarker?: MarginMarker | undefined;
+      suggestedQuestion: string;
+      suggestedSubquestion: string;
+    } | null>(null);
+
+    const [hoverAffordance, setHoverAffordance] = useState<{
+      element: HTMLElement;
+      top: number;
+    } | null>(null);
+
+    const isMarginEnabled = answerMargin?.enabled !== false;
+    const marginWidth = answerMargin?.width ?? 72;
+    const showDivider = answerMargin?.showDivider !== false;
+
+    const openMarkerPopoverForElement = useCallback((targetEl: HTMLElement) => {
+      if (!editorRef.current) return;
+      const rect = targetEl.getBoundingClientRect();
+      const existingText = targetEl.getAttribute("data-margin-marker");
+      const existingType = targetEl.getAttribute("data-margin-type") as MarginMarkerType | null;
+      const existingColor = targetEl.getAttribute("data-margin-color") || undefined;
+
+      const currentMarker: MarginMarker | undefined = existingText
+        ? { type: existingType || "custom", text: existingText, ...(existingColor ? { color: existingColor } : {}) }
+        : undefined;
+
+      const suggestions = computeSuggestedMarkers(editorRef.current);
+
+      setMarkerPopover({
+        targetBlock: targetEl,
+        rect: {
+          top: rect.top,
+          left: Math.max(12, rect.left - 24),
+          bottom: rect.top + Math.min(32, rect.height),
+          height: Math.min(32, rect.height),
+        },
+        currentMarker,
+        suggestedQuestion: suggestions.question,
+        suggestedSubquestion: suggestions.subquestion,
+      });
+    }, []);
+
+    const handleSelectMarker = useCallback(
+      (marker: MarginMarker) => {
+        if (!markerPopover?.targetBlock) return;
+        const block = markerPopover.targetBlock;
+        block.setAttribute("data-margin-marker", marker.text);
+        block.setAttribute("data-margin-type", marker.type);
+        if (marker.color) {
+          block.setAttribute("data-margin-color", marker.color);
+        } else {
+          block.removeAttribute("data-margin-color");
+        }
+        setMarkerPopover(null);
+        triggerChange();
+      },
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [markerPopover],
+    );
+
+    const handleRemoveMarker = useCallback(() => {
+      if (!markerPopover?.targetBlock) return;
+      const block = markerPopover.targetBlock;
+      block.removeAttribute("data-margin-marker");
+      block.removeAttribute("data-margin-type");
+      block.removeAttribute("data-margin-color");
+      setMarkerPopover(null);
+      triggerChange();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [markerPopover]);
+
+    const updateActiveBlockAffordance = useCallback(() => {
+      if (!isMarginEnabled || !editorRef.current || !containerRef.current) return;
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      let node: Node | null = sel.anchorNode;
+      while (node && node !== editorRef.current) {
+        if (node.nodeType === 1 && node.parentNode === editorRef.current) {
+          const block = node as HTMLElement;
+          const contRect = containerRef.current.getBoundingClientRect();
+          const bRect = block.getBoundingClientRect();
+          setHoverAffordance({
+            element: block,
+            top: bRect.top - contRect.top + 2,
+          });
+          return;
+        }
+        node = node.parentNode;
+      }
+    }, [isMarginEnabled]);
+
+    const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!isMarginEnabled || !editorRef.current || !containerRef.current) return;
+      const contRect = containerRef.current.getBoundingClientRect();
+      const block = findTopLevelBlockAtY(editorRef.current, e.clientY);
+      if (block) {
+        const bRect = block.getBoundingClientRect();
+        setHoverAffordance({
+          element: block,
+          top: bRect.top - contRect.top + 2,
+        });
+        return;
+      }
+      if (hoverAffordance) {
+        setHoverAffordance(null);
+      }
+    };
+
+    const handleMouseLeave = () => {
+      // Keep affordance if a block is currently active/focused
+      updateActiveBlockAffordance();
+    };
 
     useEffect(() => {
       if (!mathColorMenu) return;
@@ -1251,6 +1448,31 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       const el = editorRef.current;
       if (!el) return;
 
+      if (e.key === "Enter" && !e.shiftKey) {
+        setTimeout(() => {
+          const sel = window.getSelection();
+          if (!sel || !sel.anchorNode || !editorRef.current) return;
+          let node: Node | null = sel.anchorNode;
+          let currentBlock: HTMLElement | null = null;
+          while (node && node !== editorRef.current) {
+            if (node.nodeType === 1 && node.parentElement === editorRef.current) {
+              currentBlock = node as HTMLElement;
+              break;
+            }
+            node = node.parentNode;
+          }
+          if (currentBlock && currentBlock.hasAttribute("data-margin-marker")) {
+            const prev = currentBlock.previousElementSibling as HTMLElement | null;
+            if (prev && prev.getAttribute("data-margin-marker") === currentBlock.getAttribute("data-margin-marker")) {
+              currentBlock.removeAttribute("data-margin-marker");
+              currentBlock.removeAttribute("data-margin-type");
+              currentBlock.removeAttribute("data-margin-color");
+              triggerChange();
+            }
+          }
+        }, 0);
+      }
+
       if (e.key === "Tab") {
         if (handleTableTabNavigation(el, e.shiftKey)) {
           e.preventDefault();
@@ -1389,7 +1611,103 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
     );
 
     return (
-      <>
+      <div
+        ref={containerRef}
+        className="relative flex-1 min-h-0 flex flex-col group/gutter-container"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+      >
+        {isMarginEnabled && (
+          <style>{`
+            .rich-editor-gutter-surface [data-margin-marker] {
+              position: relative;
+            }
+            .rich-editor-gutter-surface [data-margin-marker]::before {
+              content: attr(data-margin-marker);
+              position: absolute;
+              left: -${marginWidth + 10}px;
+              width: ${marginWidth - 4}px;
+              top: 0;
+              text-align: right;
+              font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+              font-size: 12px;
+              line-height: 1.5;
+              pointer-events: auto;
+              cursor: pointer;
+              border-radius: 4px;
+              padding: 0 4px;
+              transition: all 0.15s ease;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            }
+            .rich-editor-gutter-surface [data-margin-type="question"]::before {
+              font-weight: 700;
+              color: #1d3fb5;
+              background-color: rgba(29, 63, 181, 0.08);
+            }
+            .rich-editor-gutter-surface [data-margin-type="answer"]::before {
+              font-weight: 700;
+              font-style: italic;
+              color: #141821;
+              background-color: rgba(20, 24, 33, 0.06);
+            }
+            .rich-editor-gutter-surface [data-margin-type="subquestion"]::before {
+              font-weight: 600;
+              color: #1d3fb5;
+              background-color: rgba(29, 63, 181, 0.05);
+            }
+            .rich-editor-gutter-surface [data-margin-type="marks"]::before {
+              font-weight: 600;
+              font-size: 11px;
+              color: #b3231f;
+              background-color: rgba(179, 35, 31, 0.08);
+            }
+            .rich-editor-gutter-surface [data-margin-type="custom"]::before {
+              font-weight: 600;
+              color: #4b5563;
+              background-color: rgba(75, 85, 99, 0.08);
+            }
+            .rich-editor-gutter-surface [data-margin-marker]:hover::before {
+              filter: brightness(0.92);
+              box-shadow: 0 0 0 1px rgba(29, 63, 181, 0.25);
+            }
+          `}</style>
+        )}
+
+        {/* Vertical divider line */}
+        {isMarginEnabled && showDivider && (
+          <div
+            className="pointer-events-none absolute top-0 bottom-0 border-r border-border/70 z-10"
+            style={{ left: `${marginWidth + 6}px` }}
+          />
+        )}
+
+        {/* Floating hover [+] affordance button (shown on blocks without markers) */}
+        {isMarginEnabled && hoverAffordance && !hoverAffordance.element.hasAttribute("data-margin-marker") && (
+          <button
+            type="button"
+            title="Add Question/Margin Marker"
+            style={{
+              position: "absolute",
+              top: `${hoverAffordance.top}px`,
+              left: `${Math.max(4, marginWidth - 18)}px`,
+              zIndex: 20,
+            }}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              openMarkerPopoverForElement(hoverAffordance.element);
+            }}
+            className="size-5 rounded flex items-center justify-center text-xs font-bold transition-all shadow-xs cursor-pointer border bg-background text-muted-foreground border-border hover:border-primary hover:text-primary hover:scale-105"
+          >
+            +
+          </button>
+        )}
+
         <div
           ref={editorRef}
           contentEditable
@@ -1401,6 +1719,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
           onInput={triggerChange}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
+          onScroll={updateActiveBlockAffordance}
           onCopy={(e) => {
             const sel = window.getSelection();
             const hasTextSel = sel && !sel.isCollapsed && sel.toString().length > 0;
@@ -1427,12 +1746,17 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
           onKeyUp={() => {
             saveSelection();
             updateFormatState();
+            updateActiveBlockAffordance();
           }}
           onMouseUp={() => {
             saveSelection();
             updateFormatState();
+            updateActiveBlockAffordance();
           }}
-          onFocus={updateFormatState}
+          onFocus={() => {
+            updateFormatState();
+            updateActiveBlockAffordance();
+          }}
           onMouseDown={(e) => {
             const el = editorRef.current;
             if (!el) return;
@@ -1474,6 +1798,19 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
             const el = editorRef.current;
             if (!el) return;
             const target = e.target as HTMLElement | null;
+
+            // Gutter click detection: open marker popover
+            const editorRect = el.getBoundingClientRect();
+            const clickRelX = e.clientX - editorRect.left;
+            if (isMarginEnabled && clickRelX <= marginWidth + 24) {
+              const targetBlock = findTopLevelBlockAtY(el, e.clientY);
+              if (targetBlock) {
+                e.preventDefault();
+                e.stopPropagation();
+                openMarkerPopoverForElement(targetBlock);
+                return;
+              }
+            }
 
             // Check if color button on math chip was clicked
             const colorBtn = target?.closest?.(".math-chip-color") as HTMLElement | null;
@@ -1576,10 +1913,14 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
               }
             }
           }}
+          style={{
+            paddingLeft: isMarginEnabled ? `${marginWidth + 18}px` : undefined,
+          }}
           className={cn(
             "min-h-0 flex-1 rounded-lg border border-input bg-card p-4 text-base leading-relaxed text-foreground outline-none transition-colors cursor-text",
             "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
             "overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]",
+            isMarginEnabled && "rich-editor-gutter-surface",
             "[&_h1]:mb-3 [&_h1]:mt-4 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:tracking-tight",
             "[&_h2]:mb-2 [&_h2]:mt-3 [&_h2]:text-xl [&_h2]:font-semibold",
             "[&_p]:mb-2.5",
@@ -1656,7 +1997,17 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
             </div>
           </div>
         )}
-      </>
+        <MarginMarkerPopover
+          isOpen={Boolean(markerPopover)}
+          anchorRect={markerPopover?.rect ?? null}
+          currentMarker={markerPopover?.currentMarker}
+          suggestedQuestion={markerPopover?.suggestedQuestion}
+          suggestedSubquestion={markerPopover?.suggestedSubquestion}
+          onSelectMarker={handleSelectMarker}
+          onRemoveMarker={handleRemoveMarker}
+          onClose={() => setMarkerPopover(null)}
+        />
+      </div>
     );
   },
 );

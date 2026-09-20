@@ -8,7 +8,7 @@
 
 import type { HandwritingSettings } from "../handwriting/types";
 import { writeText, measureHandwritten } from "../handwriting/pen";
-import type { GraphDefinition, GraphLayoutBox } from "./types";
+import type { GraphDefinition, GraphLayoutBox, GraphCoordinateSpace } from "./types";
 import { compileExpression } from "./parser";
 import {
   makeCoordTransform,
@@ -53,8 +53,21 @@ export function drawGraph(
   const canvasWidth = box.graphArea.width;
   const canvasHeight = box.graphArea.height;
 
+  const rawSpace = definition.space;
+  const space: GraphCoordinateSpace = {
+    xMin: typeof rawSpace?.xMin === "number" ? rawSpace.xMin : -5,
+    xMax: typeof rawSpace?.xMax === "number" ? rawSpace.xMax : 5,
+    ...(typeof rawSpace?.xStep === "number" ? { xStep: rawSpace.xStep } : {}),
+    yMin: typeof rawSpace?.yMin === "number" ? rawSpace.yMin : -5,
+    yMax: typeof rawSpace?.yMax === "number" ? rawSpace.yMax : 5,
+    ...(typeof rawSpace?.yStep === "number" ? { yStep: rawSpace.yStep } : {}),
+    showGrid: rawSpace?.showGrid ?? true,
+    showAxisLabels: rawSpace?.showAxisLabels ?? true,
+    originVisible: rawSpace?.originVisible ?? true,
+  };
+
   const transform = makeCoordTransform(
-    definition.space,
+    space,
     canvasLeft,
     canvasTop,
     canvasWidth,
@@ -75,17 +88,17 @@ export function drawGraph(
 
   // ── 2. Grid ──
   const xTicks = computeTickSpec(
-    definition.space.xMin,
-    definition.space.xMax,
-    definition.space.xStep,
+    space.xMin,
+    space.xMax,
+    space.xStep,
   );
   const yTicks = computeTickSpec(
-    definition.space.yMin,
-    definition.space.yMax,
-    definition.space.yStep,
+    space.yMin,
+    space.yMax,
+    space.yStep,
   );
 
-  if (definition.space.showGrid) {
+  if (space.showGrid) {
     for (const tx of xTicks.ticks) {
       const cx = transform.toCanvasX(tx);
       drawGridLine(ctx, cx, canvasTop, cx, canvasTop + canvasHeight, random, ink);
@@ -98,18 +111,18 @@ export function drawGraph(
 
   // ── 3. Axes ──
   let axisY: number;
-  if (0 >= definition.space.yMin && 0 <= definition.space.yMax) {
+  if (0 >= space.yMin && 0 <= space.yMax) {
     axisY = transform.toCanvasY(0);
-  } else if (definition.space.yMin > 0) {
+  } else if (space.yMin > 0) {
     axisY = canvasTop + canvasHeight;
   } else {
     axisY = canvasTop;
   }
 
   let axisX: number;
-  if (0 >= definition.space.xMin && 0 <= definition.space.xMax) {
+  if (0 >= space.xMin && 0 <= space.xMax) {
     axisX = transform.toCanvasX(0);
-  } else if (definition.space.xMin > 0) {
+  } else if (space.xMin > 0) {
     axisX = canvasLeft;
   } else {
     axisX = canvasLeft + canvasWidth;
@@ -147,12 +160,12 @@ export function drawGraph(
   for (const tx of xTicks.ticks) {
     const cx = transform.toCanvasX(tx);
     drawTickMark(ctx, cx, axisY, true, 8, random, ink);
-    if (definition.space.showAxisLabels) {
+    if (space.showAxisLabels) {
       if (
         tx === 0 &&
-        definition.space.originVisible &&
-        0 >= definition.space.yMin &&
-        0 <= definition.space.yMax
+        space.originVisible &&
+        0 >= space.yMin &&
+        0 <= space.yMax
       ) {
         continue;
       }
@@ -168,12 +181,12 @@ export function drawGraph(
   for (const ty of yTicks.ticks) {
     const cy = transform.toCanvasY(ty);
     drawTickMark(ctx, axisX, cy, false, 8, random, ink);
-    if (definition.space.showAxisLabels) {
+    if (space.showAxisLabels) {
       if (
         ty === 0 &&
-        definition.space.originVisible &&
-        0 >= definition.space.xMin &&
-        0 <= definition.space.xMax
+        space.originVisible &&
+        0 >= space.xMin &&
+        0 <= space.xMax
       ) {
         continue;
       }
@@ -187,12 +200,12 @@ export function drawGraph(
   }
 
   if (
-    definition.space.showAxisLabels &&
-    definition.space.originVisible &&
-    0 >= definition.space.xMin &&
-    0 <= definition.space.xMax &&
-    0 >= definition.space.yMin &&
-    0 <= definition.space.yMax
+    space.showAxisLabels &&
+    space.originVisible &&
+    0 >= space.xMin &&
+    0 <= space.xMax &&
+    0 >= space.yMin &&
+    0 <= space.yMax
   ) {
     writeText(ctx, "0", settings, axisX - tickFontSize - 4, axisY + tickFontSize + 2, random, {
       size: tickFontSize,
@@ -234,7 +247,7 @@ export function drawGraph(
       if (!fn.expression) continue;
       try {
         const compiled = compileExpression(fn.expression);
-        const samples = sampleFunction(compiled, definition.space, transform, 300);
+        const samples = sampleFunction(compiled, space, transform, 300);
         const segments = segmentizeSamples(samples);
         const curveColor = fn.color ?? ink;
 

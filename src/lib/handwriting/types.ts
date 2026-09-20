@@ -154,6 +154,15 @@ export interface MarginRuleConfig {
   thickness: number;
 }
 
+export interface AnswerMarginConfig {
+  enabled: boolean;
+  width: number; // default ~72px, range 54 - 110px
+  showDivider?: boolean; // default true
+  dividerColor?: string;
+  numberingStyle?: "auto" | "manual";
+  subquestionStyle?: "alpha" | "roman";
+}
+
 export interface PageConfig {
   size: PageSizeKey;
   customWidth: number;
@@ -165,6 +174,7 @@ export interface PageConfig {
   margin: MarginRuleConfig;
   headerHeight: number;
   footerHeight: number;
+  answerMargin?: AnswerMarginConfig | undefined;
 }
 
 export type ColumnAlignment = "left" | "center" | "right";
@@ -337,6 +347,7 @@ export const DEFAULT_PAGE: PageConfig = {
   margin: { enabled: true, color: "#d77a7a", position: 100, thickness: 1.5 },
   headerHeight: 0,
   footerHeight: 0,
+  answerMargin: { enabled: true, width: 72, showDivider: true },
 };
 
 export function newElement(kind: ElementKind, partial: Partial<PageElement> = {}): PageElement {

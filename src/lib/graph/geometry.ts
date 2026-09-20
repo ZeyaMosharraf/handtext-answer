@@ -39,7 +39,10 @@ export function makeCoordTransform(
   canvasWidth: number,
   canvasHeight: number,
 ): CoordTransform {
-  const { xMin, xMax, yMin, yMax } = space;
+  const xMin = typeof space?.xMin === "number" ? space.xMin : -5;
+  const xMax = typeof space?.xMax === "number" ? space.xMax : 5;
+  const yMin = typeof space?.yMin === "number" ? space.yMin : -5;
+  const yMax = typeof space?.yMax === "number" ? space.yMax : 5;
   const rangeX = xMax - xMin || 1;
   const rangeY = yMax - yMin || 1;
   const scaleX = canvasWidth  / rangeX;
@@ -154,7 +157,10 @@ export function sampleFunction(
   transform: CoordTransform,
   sampleCount = 300,
 ): SamplePoint[] {
-  const { xMin, xMax, yMin, yMax } = space;
+  const xMin = typeof space?.xMin === "number" ? space.xMin : -5;
+  const xMax = typeof space?.xMax === "number" ? space.xMax : 5;
+  const yMin = typeof space?.yMin === "number" ? space.yMin : -5;
+  const yMax = typeof space?.yMax === "number" ? space.yMax : 5;
   const step = (xMax - xMin) / (sampleCount - 1);
 
   // Discontinuity guard: treat values beyond this as undefined.

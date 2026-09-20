@@ -16,6 +16,14 @@ import type { GraphDefinition } from "../lib/graph/types";
 
 export type BlockType = "text" | "math" | "table" | "graph";
 
+export type MarginMarkerType = "question" | "answer" | "subquestion" | "marks" | "custom";
+
+export interface MarginMarker {
+  type: MarginMarkerType;
+  text: string;
+  color?: string | undefined;
+}
+
 export interface BaseBlock {
   /** Stable UUID identifying the block across edits and serialization cycles */
   id: string;
@@ -23,6 +31,8 @@ export interface BaseBlock {
   type: BlockType;
   /** Timestamp when the block was created */
   createdAt: number;
+  /** Optional academic margin marker (e.g. Q1, Ans, a), 10M) */
+  marginMarker?: MarginMarker | undefined;
 }
 
 export interface TextBlock extends BaseBlock {
@@ -79,11 +89,15 @@ export function generateBlockId(prefix: string = "blk"): string {
 /**
  * Creates a default empty text block with a fresh stable ID.
  */
-export function createEmptyTextBlock(html: string = "<p><br></p>"): TextBlock {
+export function createEmptyTextBlock(
+  html: string = "<p><br></p>",
+  marginMarker?: MarginMarker | undefined
+): TextBlock {
   return {
     id: generateBlockId("txt"),
     type: "text",
     html,
+    ...(marginMarker !== undefined ? { marginMarker } : {}),
     createdAt: Date.now(),
   };
 }
@@ -96,6 +110,7 @@ export function createMathBlock(
   latex: string,
   displayMode: "block" | "compact" = "block",
   color?: string | undefined,
+  marginMarker?: MarginMarker | undefined
 ): MathBlock {
   return {
     id: generateBlockId("math"),
@@ -104,6 +119,7 @@ export function createMathBlock(
     latex,
     displayMode,
     ...(color !== undefined && color !== null ? { color } : {}),
+    ...(marginMarker !== undefined ? { marginMarker } : {}),
     createdAt: Date.now(),
   };
 }
@@ -111,12 +127,17 @@ export function createMathBlock(
 /**
  * Creates a new TableBlock with a fresh stable ID.
  */
-export function createTableBlock(html: string, tableData?: TableData | undefined): TableBlock {
+export function createTableBlock(
+  html: string,
+  tableData?: TableData | undefined,
+  marginMarker?: MarginMarker | undefined
+): TableBlock {
   return {
     id: generateBlockId("tbl"),
     type: "table",
     html,
     ...(tableData !== undefined ? { tableData } : {}),
+    ...(marginMarker !== undefined ? { marginMarker } : {}),
     createdAt: Date.now(),
   };
 }
@@ -124,11 +145,15 @@ export function createTableBlock(html: string, tableData?: TableData | undefined
 /**
  * Creates a new GraphBlock with a fresh stable ID.
  */
-export function createGraphBlock(graphDef: GraphDefinition): GraphBlock {
+export function createGraphBlock(
+  graphDef: GraphDefinition,
+  marginMarker?: MarginMarker | undefined
+): GraphBlock {
   return {
     id: generateBlockId("grp"),
     type: "graph",
     graphDef,
+    ...(marginMarker !== undefined ? { marginMarker } : {}),
     createdAt: Date.now(),
   };
 }

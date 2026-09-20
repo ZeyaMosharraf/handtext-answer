@@ -372,7 +372,9 @@ export function EditorWorkspace({ project }: { project: Project }) {
         activeCoordinatesRef.current = res.coordinates;
         setRenderedInitial(true);
       })
-      .catch(() => undefined)
+      .catch((err) => {
+        console.error("RENDER_PAGE_ERROR:", err);
+      })
       .finally(() => setPreviewing(false));
   }, [previewInput, previewPageIndex]);
 
@@ -626,6 +628,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
               onGraphBlockClick={handleOpenEditGraph}
               placeholder="Write or paste your answer here..."
               className="flex-1 min-h-0 h-full overflow-y-auto"
+              answerMargin={settings.page.answerMargin}
             />
             <FloatingFormatBubble
               editorRef={richEditorRef}

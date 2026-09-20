@@ -222,6 +222,108 @@ export function PageSettingsPanel({ settings, onChange }: Props) {
         <Slider label="Right inset" min={40} max={220} step={5} value={settings.marginRight} onChange={num("marginRight")} suffix="px" />
         <Slider label="Bottom inset" min={40} max={220} step={5} value={settings.marginBottom} onChange={num("marginBottom")} suffix="px" />
       </Card>
+
+      <Card className="space-y-4 p-4">
+        <Label>Answer sheet margin</Label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="size-4 accent-primary"
+            checked={settings.page.answerMargin?.enabled ?? true}
+            onChange={(e) =>
+              setPage({
+                answerMargin: {
+                  enabled: e.target.checked,
+                  width: settings.page.answerMargin?.width ?? 72,
+                  showDivider: settings.page.answerMargin?.showDivider ?? true,
+                  numberingStyle: settings.page.answerMargin?.numberingStyle ?? "auto",
+                  subquestionStyle: settings.page.answerMargin?.subquestionStyle ?? "alpha",
+                },
+              })
+            }
+          />
+          Enable Answer Margin
+        </label>
+
+        {(settings.page.answerMargin?.enabled ?? true) && (
+          <>
+            <Slider
+              label="Margin width"
+              min={54}
+              max={110}
+              step={2}
+              value={settings.page.answerMargin?.width ?? 72}
+              onChange={(e) =>
+                setPage({
+                  answerMargin: {
+                    ...(settings.page.answerMargin ?? { enabled: true, showDivider: true }),
+                    width: Number(e.target.value),
+                  },
+                })
+              }
+              suffix="px"
+            />
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="size-4 accent-primary"
+                checked={settings.page.answerMargin?.showDivider ?? true}
+                onChange={(e) =>
+                  setPage({
+                    answerMargin: {
+                      ...(settings.page.answerMargin ?? { enabled: true, width: 72 }),
+                      showDivider: e.target.checked,
+                    },
+                  })
+                }
+              />
+              Show divider
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label htmlFor="qnum" className="text-xs font-medium text-muted-foreground">
+                  Question numbering
+                </label>
+                <Select
+                  id="qnum"
+                  value={settings.page.answerMargin?.numberingStyle ?? "auto"}
+                  onChange={(e) =>
+                    setPage({
+                      answerMargin: {
+                        ...(settings.page.answerMargin ?? { enabled: true, width: 72, showDivider: true }),
+                        numberingStyle: e.target.value as "auto" | "manual",
+                      },
+                    })
+                  }
+                >
+                  <option value="auto">Automatic (Q1, Q2...)</option>
+                  <option value="manual">Manual</option>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="sqstyle" className="text-xs font-medium text-muted-foreground">
+                  Sub-question style
+                </label>
+                <Select
+                  id="sqstyle"
+                  value={settings.page.answerMargin?.subquestionStyle ?? "alpha"}
+                  onChange={(e) =>
+                    setPage({
+                      answerMargin: {
+                        ...(settings.page.answerMargin ?? { enabled: true, width: 72, showDivider: true }),
+                        subquestionStyle: e.target.value as "alpha" | "roman",
+                      },
+                    })
+                  }
+                >
+                  <option value="alpha">a), b), c)...</option>
+                  <option value="roman">(i), (ii), (iii)...</option>
+                </Select>
+              </div>
+            </div>
+          </>
+        )}
+      </Card>
     </div>
   );
 }

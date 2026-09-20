@@ -168,6 +168,13 @@ function paintPaper(
     ctx.moveTo(settings.page.margin.position, paperTop);
     ctx.lineTo(settings.page.margin.position, paperBottom);
     ctx.stroke();
+  } else if (coordinates.marginRuleX && coordinates.marginRuleX > 0) {
+    ctx.strokeStyle = settings.page.answerMargin?.dividerColor || "rgba(215, 122, 122, 0.7)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(coordinates.marginRuleX, paperTop);
+    ctx.lineTo(coordinates.marginRuleX, paperBottom);
+    ctx.stroke();
   }
 }
 
@@ -632,6 +639,28 @@ export async function renderPageToCanvas(
 
   const tableBounds: LayoutTableBounds[] = [];
   for (const placement of page.placements) {
+    // ── Draw handwritten question / margin marker (e.g. Q1, Ans, a), etc.) in left gutter ──
+    if (placement.marginMarker && placement.marginMarker.text.trim()) {
+      const markerBaselineY = getBaseline(page.coordinates, placement.lineIndex);
+      const markerX = page.coordinates.marginMarkerLeft ?? 28;
+      const markerColor = placement.marginMarker.color || ink;
+      const scale = "scale" in placement && typeof (placement as any).scale === "number"
+        ? (placement as any).scale
+        : 1.0;
+      writeSegments(
+        ctx,
+        plainSegments(placement.marginMarker.text),
+        input.settings,
+        markerX,
+        markerBaselineY,
+        random,
+        {
+          size: input.settings.fontSize * scale,
+          color: markerColor,
+        },
+      );
+    }
+
     if (placement.type === "tableRow") {
       tableBounds.push(drawTableRow(ctx, placement, input.settings, page.coordinates, random, ink));
       continue;
@@ -723,6 +752,28 @@ export async function renderPages(
 
     const tableBounds: LayoutTableBounds[] = [];
     for (const placement of page.placements) {
+      // ── Draw handwritten question / margin marker (e.g. Q1, Ans, a), etc.) in left gutter ──
+      if (placement.marginMarker && placement.marginMarker.text.trim()) {
+        const markerBaselineY = getBaseline(page.coordinates, placement.lineIndex);
+        const markerX = page.coordinates.marginMarkerLeft ?? 28;
+        const markerColor = placement.marginMarker.color || ink;
+        const scale = "scale" in placement && typeof (placement as any).scale === "number"
+          ? (placement as any).scale
+          : 1.0;
+        writeSegments(
+          ctx,
+          plainSegments(placement.marginMarker.text),
+          input.settings,
+          markerX,
+          markerBaselineY,
+          random,
+          {
+            size: input.settings.fontSize * scale,
+            color: markerColor,
+          },
+        );
+      }
+
       if (placement.type === "tableRow") {
         tableBounds.push(drawTableRow(ctx, placement, input.settings, page.coordinates, random, ink));
         continue;

@@ -21,6 +21,8 @@ import {
   type MathBlock,
   type TableBlock,
   type GraphBlock,
+  type MarginMarker,
+  type MarginMarkerType,
   createEmptyTextBlock,
   generateBlockId,
 } from "../../types/document";
@@ -52,6 +54,38 @@ export function escapeHtml(str: string): string {
   return escapeAttr(str);
 }
 
+// ─── Margin Marker Serialization & Extraction Helpers ────────────────────────
+
+export function serializeMarginMarkerAttrs(marker?: MarginMarker): string {
+  if (!marker || !marker.text || !marker.text.trim()) return "";
+  let attrs = ` data-margin-marker="${escapeAttr(marker.text.trim())}" data-margin-type="${escapeAttr(marker.type || "custom")}"`;
+  if (marker.color && marker.color.trim()) {
+    attrs += ` data-margin-color="${escapeAttr(marker.color.trim())}"`;
+  }
+  return attrs;
+}
+
+export function parseMarginMarkerFromAttributes(
+  textAttr: string | null | undefined,
+  typeAttr: string | null | undefined,
+  colorAttr?: string | null | undefined
+): MarginMarker | undefined {
+  if (!textAttr || !textAttr.trim()) return undefined;
+  const rawType = typeAttr ? typeAttr.trim().toLowerCase() : "";
+  const validTypes: MarginMarkerType[] = ["question", "answer", "subquestion", "marks", "custom"];
+  const type: MarginMarkerType = validTypes.includes(rawType as MarginMarkerType)
+    ? (rawType as MarginMarkerType)
+    : "custom";
+  const marker: MarginMarker = {
+    type,
+    text: textAttr.trim(),
+  };
+  if (colorAttr && colorAttr.trim()) {
+    marker.color = colorAttr.trim();
+  }
+  return marker;
+}
+
 // ─── Serialization: DocumentBlock[] -> HTML ─────────────────────────────────
 
 /**
@@ -70,6 +104,8 @@ export function blocksToHtml(blocks: DocumentBlock[]): string {
   const parts: string[] = [];
 
   for (const block of blocks) {
+    const markerAttrs = serializeMarginMarkerAttrs(block.marginMarker);
+
     switch (block.type) {
       case "text": {
         let content = block.html?.trim() ? block.html : "<p><br></p>";
@@ -77,7 +113,7 @@ export function blocksToHtml(blocks: DocumentBlock[]): string {
           content = content.trim().replace(/^<div[^>]*data-block-type=["']text["'][^>]*>/i, "").replace(/<\/div>$/i, "");
         }
         parts.push(
-          `<div data-block-id="${escapeAttr(block.id)}" data-block-type="text">${content}</div>`
+          `<div data-block-id="${escapeAttr(block.id)}" data-block-type="text"${markerAttrs}>${content}</div>`
         );
         break;
       }
@@ -90,7 +126,7 @@ export function blocksToHtml(blocks: DocumentBlock[]): string {
         const colorAttr = block.color ? ` data-color="${escapeAttr(block.color)}"` : "";
 
         parts.push(
-          `<div data-block-id="${escapeAttr(block.id)}" data-block-type="math" data-natural-expr="${escapeAttr(naturalExpr)}" data-latex="${escapeAttr(latex)}" data-display-mode="${escapeAttr(displayMode)}"${colorAttr} class="math-block" contenteditable="false">${innerContent}</div>`
+          `<div data-block-id="${escapeAttr(block.id)}" data-block-type="math" data-natural-expr="${escapeAttr(naturalExpr)}" data-latex="${escapeAttr(latex)}" data-display-mode="${escapeAttr(displayMode)}"${colorAttr}${markerAttrs} class="math-block" contenteditable="false">${innerContent}</div>`
         );
         break;
       }
@@ -98,7 +134,7 @@ export function blocksToHtml(blocks: DocumentBlock[]): string {
       case "table": {
         const tableHtml = block.html?.trim() || "<table><tbody><tr><td></td></tr></tbody></table>";
         parts.push(
-          `<div data-block-id="${escapeAttr(block.id)}" data-block-type="table">${tableHtml}</div>`
+          `<div data-block-id="${escapeAttr(block.id)}" data-block-type="table"${markerAttrs}>${tableHtml}</div>`
         );
         break;
       }
@@ -108,7 +144,7 @@ export function blocksToHtml(blocks: DocumentBlock[]): string {
         const titleOrType = block.graphDef.title || block.graphDef.type || "Graph";
 
         parts.push(
-          `<div data-block-id="${escapeAttr(block.id)}" data-block-type="graph" data-graph-definition="${escapeAttr(defJson)}" class="graph-block" contenteditable="false"><span class="graph-placeholder" style="width: 100%; height: 180px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; font-family: monospace; color: #666;">[Graph: ${escapeHtml(titleOrType)}]</span></div>`
+          `<div data-block-id="${escapeAttr(block.id)}" data-block-type="graph" data-graph-definition="${escapeAttr(defJson)}"${markerAttrs} class="graph-block" contenteditable="false"><span class="graph-placeholder" style="width: 100%; height: 180px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; font-family: monospace; color: #666;">[Graph: ${escapeHtml(titleOrType)}]</span></div>`
         );
         break;
       }
@@ -160,6 +196,17 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
             el.getAttribute("data-block-id") ||
             generateBlockId(typeAttr ? typeAttr.slice(0, 3) : "blk");
 
+          const markerText =
+            el.getAttribute("data-margin-marker") ||
+            el.querySelector("[data-margin-marker]")?.getAttribute("data-margin-marker");
+          const markerType =
+            el.getAttribute("data-margin-type") ||
+            el.querySelector("[data-margin-marker]")?.getAttribute("data-margin-type");
+          const markerColor =
+            el.getAttribute("data-margin-color") ||
+            el.querySelector("[data-margin-marker]")?.getAttribute("data-margin-color");
+          const marginMarker = parseMarginMarkerFromAttributes(markerText, markerType, markerColor);
+
           if (
             typeAttr === "math" ||
             el.classList.contains("math-block") ||
@@ -177,6 +224,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
               latex,
               displayMode: displayMode === "compact" ? "compact" : "block",
               ...(color ? { color } : {}),
+              ...(marginMarker ? { marginMarker } : {}),
               createdAt: Date.now(),
             });
           } else if (
@@ -200,6 +248,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
               id: blockId,
               type: "graph",
               graphDef,
+              ...(marginMarker ? { marginMarker } : {}),
               createdAt: Date.now(),
             });
           } else if (
@@ -212,6 +261,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
               id: blockId,
               type: "table",
               html: tableEl ? tableEl.outerHTML : el.innerHTML,
+              ...(marginMarker ? { marginMarker } : {}),
               createdAt: Date.now(),
             });
           } else {
@@ -224,6 +274,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
               id: blockId,
               type: "text",
               html: inner,
+              ...(marginMarker ? { marginMarker } : {}),
               createdAt: Date.now(),
             });
           }
@@ -261,11 +312,29 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
     const fullMatchedDiv = match[0];
     const innerHtml = match[3] || match[6] || "";
 
+    const markerTextMatch =
+      fullMatchedDiv.match(/data-margin-marker=["']([^"']*)["']/i) ||
+      innerHtml.match(/data-margin-marker=["']([^"']*)["']/i);
+    const markerTypeMatch =
+      fullMatchedDiv.match(/data-margin-type=["']([^"']*)["']/i) ||
+      innerHtml.match(/data-margin-type=["']([^"']*)["']/i);
+    const markerColorMatch =
+      fullMatchedDiv.match(/data-margin-color=["']([^"']*)["']/i) ||
+      innerHtml.match(/data-margin-color=["']([^"']*)["']/i);
+    const marginMarker = markerTextMatch
+      ? parseMarginMarkerFromAttributes(
+          unescapeAttr(markerTextMatch[1] ?? ""),
+          markerTypeMatch ? unescapeAttr(markerTypeMatch[1] ?? "") : undefined,
+          markerColorMatch ? unescapeAttr(markerColorMatch[1] ?? "") : undefined
+        )
+      : undefined;
+
     if (blockType === "text") {
       modernBlocks.push({
         id: blockId,
         type: "text",
         html: innerHtml,
+        ...(marginMarker ? { marginMarker } : {}),
         createdAt: Date.now(),
       });
     } else if (blockType === "math") {
@@ -290,6 +359,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
         latex,
         displayMode: displayMode === "compact" ? "compact" : "block",
         ...(color ? { color } : {}),
+        ...(marginMarker ? { marginMarker } : {}),
         createdAt: Date.now(),
       });
     } else if (blockType === "table") {
@@ -300,6 +370,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
         id: blockId,
         type: "table",
         html: tableHtml,
+        ...(marginMarker ? { marginMarker } : {}),
         createdAt: Date.now(),
       });
     } else if (blockType === "graph") {
@@ -320,6 +391,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
         id: blockId,
         type: "graph",
         graphDef,
+        ...(marginMarker ? { marginMarker } : {}),
         createdAt: Date.now(),
       });
     }
@@ -351,7 +423,14 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
   // Step 1: Pre-tokenize math blocks so nested divs don't break regex matching
   const mathTokenMap = new Map<
     string,
-    { id?: string | undefined; latex: string; naturalExpr: string; displayMode: "block" | "compact"; color?: string | undefined }
+    {
+      id?: string | undefined;
+      latex: string;
+      naturalExpr: string;
+      displayMode: "block" | "compact";
+      color?: string | undefined;
+      marginMarker?: MarginMarker | undefined;
+    }
   >();
   let mathCounter = 0;
 
@@ -363,6 +442,9 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
       const naturalMatch = fullMatch.match(/data-natural-expr=["']([^"']*)["']/i);
       const displayMatch = fullMatch.match(/data-display-mode=["']([^"']*)["']/i);
       const colorMatch = fullMatch.match(/data-color=["']([^"']*)["']/i);
+      const markerMatch = fullMatch.match(/data-margin-marker=["']([^"']*)["']/i);
+      const markerTypeMatch = fullMatch.match(/data-margin-type=["']([^"']*)["']/i);
+      const markerColorMatch = fullMatch.match(/data-margin-color=["']([^"']*)["']/i);
 
       // Extract inner text fallback if data-latex is missing
       const innerText = fullMatch.replace(/<[^>]+>/g, "").trim();
@@ -370,6 +452,13 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
       const naturalExpr = naturalMatch ? unescapeAttr(naturalMatch[1] ?? "") : latex;
       const displayMode = (displayMatch ? displayMatch[1] : "block") as "block" | "compact";
       const color = colorMatch ? unescapeAttr(colorMatch[1] ?? "") : undefined;
+      const marginMarker = markerMatch
+        ? parseMarginMarkerFromAttributes(
+            unescapeAttr(markerMatch[1] ?? ""),
+            markerTypeMatch ? unescapeAttr(markerTypeMatch[1] ?? "") : undefined,
+            markerColorMatch ? unescapeAttr(markerColorMatch[1] ?? "") : undefined
+          )
+        : undefined;
 
       const token = `__HANDTEXT_MATH_BLOCK_TOKEN_${mathCounter++}__`;
       mathTokenMap.set(token, {
@@ -378,6 +467,7 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
         naturalExpr,
         displayMode,
         color,
+        marginMarker,
       });
 
       return `\n${token}\n`;
@@ -385,7 +475,10 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
   );
 
   // Step 2: Pre-tokenize graph blocks
-  const graphTokenMap = new Map<string, { id?: string | undefined; graphDef: GraphDefinition }>();
+  const graphTokenMap = new Map<
+    string,
+    { id?: string | undefined; graphDef: GraphDefinition; marginMarker?: MarginMarker | undefined }
+  >();
   let graphCounter = 0;
 
   tokenized = tokenized.replace(
@@ -393,6 +486,9 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
     (fullMatch) => {
       const idMatch = fullMatch.match(/data-block-id=["']([^"']*)["']/i);
       const defMatch = fullMatch.match(/data-graph-definition=["']([^"']*)["']/i);
+      const markerMatch = fullMatch.match(/data-margin-marker=["']([^"']*)["']/i);
+      const markerTypeMatch = fullMatch.match(/data-margin-type=["']([^"']*)["']/i);
+      const markerColorMatch = fullMatch.match(/data-margin-color=["']([^"']*)["']/i);
 
       let graphDef: GraphDefinition;
       const idSeed = (idMatch && idMatch[1]) ? idMatch[1] : "grp";
@@ -406,10 +502,19 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
         graphDef = createDefaultGraphDef(idSeed);
       }
 
+      const marginMarker = markerMatch
+        ? parseMarginMarkerFromAttributes(
+            unescapeAttr(markerMatch[1] ?? ""),
+            markerTypeMatch ? unescapeAttr(markerTypeMatch[1] ?? "") : undefined,
+            markerColorMatch ? unescapeAttr(markerColorMatch[1] ?? "") : undefined
+          )
+        : undefined;
+
       const token = `__HANDTEXT_GRAPH_BLOCK_TOKEN_${graphCounter++}__`;
       graphTokenMap.set(token, {
         id: idMatch ? idMatch[1] : undefined,
         graphDef,
+        marginMarker,
       });
 
       return `\n${token}\n`;
@@ -417,15 +522,31 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
   );
 
   // Step 3: Pre-tokenize tables
-  const tableTokenMap = new Map<string, { id?: string | undefined; tableHtml: string }>();
+  const tableTokenMap = new Map<
+    string,
+    { id?: string | undefined; tableHtml: string; marginMarker?: MarginMarker | undefined }
+  >();
   let tableCounter = 0;
 
   tokenized = tokenized.replace(/<table[\s\S]*?<\/table>/gi, (tableHtml) => {
     const idMatch = tableHtml.match(/data-block-id=["']([^"']*)["']/i);
+    const markerMatch = tableHtml.match(/data-margin-marker=["']([^"']*)["']/i);
+    const markerTypeMatch = tableHtml.match(/data-margin-type=["']([^"']*)["']/i);
+    const markerColorMatch = tableHtml.match(/data-margin-color=["']([^"']*)["']/i);
+
+    const marginMarker = markerMatch
+      ? parseMarginMarkerFromAttributes(
+          unescapeAttr(markerMatch[1] ?? ""),
+          markerTypeMatch ? unescapeAttr(markerTypeMatch[1] ?? "") : undefined,
+          markerColorMatch ? unescapeAttr(markerColorMatch[1] ?? "") : undefined
+        )
+      : undefined;
+
     const token = `__HANDTEXT_TABLE_BLOCK_TOKEN_${tableCounter++}__`;
     tableTokenMap.set(token, {
       id: idMatch ? idMatch[1] : undefined,
       tableHtml,
+      marginMarker,
     });
     return `\n${token}\n`;
   });
@@ -455,6 +576,7 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
         latex: data.latex,
         displayMode: data.displayMode,
         ...(data.color ? { color: data.color } : {}),
+        ...(data.marginMarker ? { marginMarker: data.marginMarker } : {}),
         createdAt: Date.now(),
       });
     } else if (tableTokenMap.has(token)) {
@@ -463,6 +585,7 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
         id: data.id || generateBlockId("tbl"),
         type: "table",
         html: data.tableHtml,
+        ...(data.marginMarker ? { marginMarker: data.marginMarker } : {}),
         createdAt: Date.now(),
       });
     } else if (graphTokenMap.has(token)) {
@@ -471,6 +594,7 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
         id: data.id || generateBlockId("grp"),
         type: "graph",
         graphDef: data.graphDef,
+        ...(data.marginMarker ? { marginMarker: data.marginMarker } : {}),
         createdAt: Date.now(),
       });
     }
@@ -498,6 +622,17 @@ function buildTextBlockFromHtmlChunk(chunkHtml: string): TextBlock {
   const idMatch = chunkHtml.match(/data-block-id=["']([^"']*)["']/i);
   const blockId = idMatch ? idMatch[1]! : generateBlockId("txt");
 
+  const markerMatch = chunkHtml.match(/data-margin-marker=["']([^"']*)["']/i);
+  const markerTypeMatch = chunkHtml.match(/data-margin-type=["']([^"']*)["']/i);
+  const markerColorMatch = chunkHtml.match(/data-margin-color=["']([^"']*)["']/i);
+  const marginMarker = markerMatch
+    ? parseMarginMarkerFromAttributes(
+        unescapeAttr(markerMatch[1] ?? ""),
+        markerTypeMatch ? unescapeAttr(markerTypeMatch[1] ?? "") : undefined,
+        markerColorMatch ? unescapeAttr(markerColorMatch[1] ?? "") : undefined
+      )
+    : undefined;
+
   // Clean wrapper divs if present
   let cleanHtml = chunkHtml;
   while (/^<div[^>]*data-block-type=["']text["'][^>]*>([\s\S]*)<\/div>$/i.test(cleanHtml.trim())) {
@@ -508,6 +643,7 @@ function buildTextBlockFromHtmlChunk(chunkHtml: string): TextBlock {
     id: blockId,
     type: "text",
     html: cleanHtml || "<p><br></p>",
+    ...(marginMarker ? { marginMarker } : {}),
     createdAt: Date.now(),
   };
 }
