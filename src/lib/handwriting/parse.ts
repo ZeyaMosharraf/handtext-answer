@@ -379,6 +379,24 @@ function extractMarginMarker(attrs: string): MarginMarker | undefined {
   };
 }
 
+function stripPrefixFromSegs(segs: Seg[], charCount: number): Seg[] {
+  let remaining = charCount;
+  const result: Seg[] = [];
+  for (const seg of segs) {
+    if (remaining <= 0) {
+      result.push({ ...seg });
+      continue;
+    }
+    if (seg.text.length <= remaining) {
+      remaining -= seg.text.length;
+      continue;
+    }
+    result.push({ ...seg, text: seg.text.slice(remaining) });
+    remaining = 0;
+  }
+  return result.length ? result : plainSegments("");
+}
+
 function stripTextBlockWrappers(html: string): string {
   let res = html;
   const openRe = /<div[^>]*data-block-type=["']text["'][^>]*>/gi;
@@ -415,7 +433,11 @@ function stripTextBlockWrappers(html: string): string {
         const markerAttrs = ` data-margin-marker="${markerMatch[1]}"` +
           (typeMatch ? ` data-margin-type="${typeMatch[1]}"` : "") +
           (colorMatch ? ` data-margin-color="${colorMatch[1]}"` : "");
-        innerContent = innerContent.replace(/<([a-z0-9]+)([^>]*)>/i, `<$1$2${markerAttrs}>`);
+        if (/<(h1|h2|h3|h4|blockquote|table|ul|ol|p|div|pre)\b/i.test(innerContent)) {
+          innerContent = innerContent.replace(/<(h1|h2|h3|h4|blockquote|table|ul|ol|p|div|pre)([^>]*)>/i, `<$1$2${markerAttrs}>`);
+        } else {
+          innerContent = `<p${markerAttrs}>${innerContent}</p>`;
+        }
       }
       res = res.slice(0, startIdx) + "\n" + innerContent + "\n" + res.slice(endIdx + closeLen);
       openRe.lastIndex = startIdx;
@@ -792,13 +814,64 @@ export function parseHtmlContent(
 
       const cleanInner = inner.trim();
       if (!cleanInner || cleanInner === "<br>" || cleanInner === "<br/>" || cleanInner === "<br />" || cleanInner === "&nbsp;") {
-        blocks.push({ kind: "blank", text: "" });
+        if (marginMarker) {
+          blocks.push({ kind: "paragraph", text: "", segs: plainSegments(""), marginMarker });
+        } else {
+          blocks.push({ kind: "blank", text: "" });
+        }
         continue;
       }
       const segs = parseInlineHtml(inner);
       const text = segText(segs).trim();
+
+      // Check if text itself represents a standalone margin marker (e.g. user typed "q1" or "Q1." or "Ans" on a line)
+      if (!marginMarker) {
+        const standaloneMatch = text.match(/^(Q\d+|Ans|[a-z]\)|\([a-z]\))[.:]?$/i);
+        if (standaloneMatch) {
+          const rawM = standaloneMatch[1]!;
+          const normM = rawM.startsWith("q") || rawM.startsWith("Q") ? rawM.toUpperCase() : rawM;
+          const inferredType: MarginMarkerType = normM.startsWith("Q")
+            ? "question"
+            : normM.toLowerCase() === "ans"
+            ? "answer"
+            : "subquestion";
+          blocks.push({
+            kind: "paragraph",
+            text: "",
+            segs: plainSegments(""),
+            marginMarker: { type: inferredType, text: normM },
+          });
+          continue;
+        }
+
+        // Also check if text starts with a marker prefix like "Q1. " or "Q1: " or "Ans: "
+        const prefixMatch = text.match(/^(Q\d+|Ans|[a-z]\)|\([a-z]\))[:.]\s+([\s\S]+)$/i);
+        if (prefixMatch) {
+          const rawM = prefixMatch[1]!;
+          const normM = rawM.startsWith("q") || rawM.startsWith("Q") ? rawM.toUpperCase() : rawM;
+          const inferredType: MarginMarkerType = normM.startsWith("Q")
+            ? "question"
+            : normM.toLowerCase() === "ans"
+            ? "answer"
+            : "subquestion";
+          const bodyText = prefixMatch[2]!;
+          const strippedSegs = stripPrefixFromSegs(segs, prefixMatch[0].length - bodyText.length);
+          blocks.push({
+            kind: "paragraph",
+            text: segText(strippedSegs),
+            segs: strippedSegs,
+            marginMarker: { type: inferredType, text: normM },
+          });
+          continue;
+        }
+      }
+
       if (!text) {
-        blocks.push({ kind: "blank", text: "" });
+        if (marginMarker) {
+          blocks.push({ kind: "paragraph", text: "", segs: plainSegments(""), marginMarker });
+        } else {
+          blocks.push({ kind: "blank", text: "" });
+        }
       } else {
         blocks.push({ kind: "paragraph", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
       }
@@ -867,6 +940,43 @@ function parseLegacyMarkdown(raw: string): Block[] {
 
     if (!line) {
       blocks.push({ kind: "blank", text: "" });
+      continue;
+    }
+
+    const markerLineMatch = line.match(/^(Q\d+|Ans|[a-z]\)|\([a-z]\))[.:]?$/i);
+    if (markerLineMatch) {
+      const rawM = markerLineMatch[1]!;
+      const normM = rawM.startsWith("q") || rawM.startsWith("Q") ? rawM.toUpperCase() : rawM;
+      const inferredType: MarginMarkerType = normM.startsWith("Q")
+        ? "question"
+        : normM.toLowerCase() === "ans"
+        ? "answer"
+        : "subquestion";
+      blocks.push({
+        kind: "paragraph",
+        text: "",
+        segs: plainSegments(""),
+        marginMarker: { type: inferredType, text: normM },
+      });
+      continue;
+    }
+
+    const prefixLineMatch = line.match(/^(Q\d+|Ans|[a-z]\)|\([a-z]\))[:.]\s+([\s\S]+)$/i);
+    if (prefixLineMatch) {
+      const rawM = prefixLineMatch[1]!;
+      const normM = rawM.startsWith("q") || rawM.startsWith("Q") ? rawM.toUpperCase() : rawM;
+      const inferredType: MarginMarkerType = normM.startsWith("Q")
+        ? "question"
+        : normM.toLowerCase() === "ans"
+        ? "answer"
+        : "subquestion";
+      const bodyText = prefixLineMatch[2]!;
+      blocks.push({
+        kind: "paragraph",
+        text: bodyText,
+        segs: parseInline(bodyText),
+        marginMarker: { type: inferredType, text: normM },
+      });
       continue;
     }
 
@@ -1026,9 +1136,16 @@ export function blocksToHtml(blocks: Block[]): string {
       case "divider":
         parts.push("<hr>");
         break;
-      case "blank":
-        parts.push("<p><br></p>");
+      case "blank": {
+        if (b.marginMarker) {
+          const mAttrs = ` data-margin-marker="${b.marginMarker.text}" data-margin-type="${b.marginMarker.type}"` +
+            (b.marginMarker.color ? ` data-margin-color="${b.marginMarker.color}"` : "");
+          parts.push(`<p${mAttrs}><br></p>`);
+        } else {
+          parts.push("<p><br></p>");
+        }
         break;
+      }
       case "table": {
         if (b.table) {
           const t = b.table;
@@ -1065,9 +1182,15 @@ export function blocksToHtml(blocks: Block[]): string {
         break;
       }
       case "paragraph":
-      default:
-        parts.push(`<p>${segsToHtml(b.segs)}</p>`);
+      default: {
+        const mAttrs = b.marginMarker
+          ? ` data-margin-marker="${b.marginMarker.text}" data-margin-type="${b.marginMarker.type}"` +
+            (b.marginMarker.color ? ` data-margin-color="${b.marginMarker.color}"` : "")
+          : "";
+        const innerText = segsToHtml(b.segs);
+        parts.push(`<p${mAttrs}>${innerText || "<br>"}</p>`);
         break;
+      }
     }
   }
 

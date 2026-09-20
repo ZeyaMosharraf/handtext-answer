@@ -534,7 +534,7 @@ function blockLines(
   logicalLines.forEach((lineSegs, logicalLineIdx) => {
     const wrapped = wrapSegments(ctx, lineSegs, settings, scale, availableWidth);
     if (wrapped.length === 0) {
-      if (logicalLines.length > 1 || logicalLineIdx > 0) {
+      if (logicalLines.length > 1 || logicalLineIdx > 0 || block.marginMarker) {
         resultLines.push({
           type: "line",
           segs: plainSegments(""),
@@ -671,7 +671,21 @@ function buildFlow(
   let tableId = 0;
   for (const block of blocks) {
     if (block.kind === "blank") {
-      pendingGapLines += 1;
+      if (block.marginMarker) {
+        flow.push({
+          type: "line",
+          segs: plainSegments(""),
+          kind: "paragraph",
+          indent: 0,
+          scale: 1,
+          underline: false,
+          gapLines: pendingGapLines,
+          marginMarker: block.marginMarker,
+        });
+        pendingGapLines = 0;
+      } else {
+        pendingGapLines += 1;
+      }
       continue;
     }
     if (block.kind === "divider") {

@@ -1482,10 +1482,55 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
       if (!el) return;
 
       if (e.key === "Enter" && !e.shiftKey) {
-        setTimeout(() => {
-          const sel = window.getSelection();
-          if (!sel || !sel.anchorNode || !editorRef.current) return;
+        // Check if current block contains only a marker shortcut (e.g. user typed "q1" or "Q1." on a blank line)
+        const sel = window.getSelection();
+        if (sel && sel.anchorNode && el.contains(sel.anchorNode)) {
           let node: Node | null = sel.anchorNode;
+          let currentBlock: HTMLElement | null = null;
+          while (node && node !== el) {
+            if (node.nodeType === 1 && node.parentElement === el) {
+              currentBlock = node as HTMLElement;
+              break;
+            }
+            node = node.parentNode;
+          }
+          if (currentBlock && !currentBlock.hasAttribute("data-margin-marker")) {
+            const rawText = (currentBlock.textContent || "").trim();
+            const standaloneMatch = rawText.match(/^(Q\d+|Ans|[a-z]\)|\([a-z]\))[.:]?$/i);
+            if (standaloneMatch) {
+              e.preventDefault();
+              const rawM = standaloneMatch[1]!;
+              const normM = rawM.startsWith("q") || rawM.startsWith("Q") ? rawM.toUpperCase() : rawM;
+              const inferredType: MarginMarkerType = normM.startsWith("Q")
+                ? "question"
+                : normM.toLowerCase() === "ans"
+                ? "answer"
+                : "subquestion";
+              currentBlock.setAttribute("data-margin-marker", normM);
+              currentBlock.setAttribute("data-margin-type", inferredType);
+              currentBlock.innerHTML = "<br>";
+              const nextP = document.createElement("p");
+              nextP.innerHTML = "<br>";
+              if (currentBlock.nextSibling) {
+                el.insertBefore(nextP, currentBlock.nextSibling);
+              } else {
+                el.appendChild(nextP);
+              }
+              const newRange = document.createRange();
+              newRange.setStart(nextP, 0);
+              newRange.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(newRange);
+              triggerChange();
+              return;
+            }
+          }
+        }
+
+        setTimeout(() => {
+          const selAfter = window.getSelection();
+          if (!selAfter || !selAfter.anchorNode || !editorRef.current) return;
+          let node: Node | null = selAfter.anchorNode;
           let currentBlock: HTMLElement | null = null;
           while (node && node !== editorRef.current) {
             if (node.nodeType === 1 && node.parentElement === editorRef.current) {
@@ -1500,10 +1545,51 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
               currentBlock.removeAttribute("data-margin-marker");
               currentBlock.removeAttribute("data-margin-type");
               currentBlock.removeAttribute("data-margin-color");
+              currentBlock.style.removeProperty("--marker-color");
               triggerChange();
             }
           }
         }, 0);
+      }
+
+      if (e.key === " ") {
+        // Space shortcut: typing "q1. " or "Q1. " or "Ans: " converts the prefix to a margin marker
+        const sel = window.getSelection();
+        if (sel && sel.anchorNode && el.contains(sel.anchorNode)) {
+          let node: Node | null = sel.anchorNode;
+          let currentBlock: HTMLElement | null = null;
+          while (node && node !== el) {
+            if (node.nodeType === 1 && node.parentElement === el) {
+              currentBlock = node as HTMLElement;
+              break;
+            }
+            node = node.parentNode;
+          }
+          if (currentBlock && !currentBlock.hasAttribute("data-margin-marker")) {
+            const rawText = (currentBlock.textContent || "").trim();
+            const standaloneMatch = rawText.match(/^(Q\d+|Ans|[a-z]\)|\([a-z]\))[.:]?$/i);
+            if (standaloneMatch) {
+              e.preventDefault();
+              const rawM = standaloneMatch[1]!;
+              const normM = rawM.startsWith("q") || rawM.startsWith("Q") ? rawM.toUpperCase() : rawM;
+              const inferredType: MarginMarkerType = normM.startsWith("Q")
+                ? "question"
+                : normM.toLowerCase() === "ans"
+                ? "answer"
+                : "subquestion";
+              currentBlock.setAttribute("data-margin-marker", normM);
+              currentBlock.setAttribute("data-margin-type", inferredType);
+              currentBlock.innerHTML = "<br>";
+              const newRange = document.createRange();
+              newRange.setStart(currentBlock, 0);
+              newRange.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(newRange);
+              triggerChange();
+              return;
+            }
+          }
+        }
       }
 
       if (e.key === "Tab") {
@@ -1519,6 +1605,28 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         const anchor = sel?.anchorNode;
         if (sel && sel.rangeCount > 0 && sel.isCollapsed && anchor && editorRef.current?.contains(anchor)) {
           if (e.key === "Backspace") {
+            let node: Node | null = anchor;
+            let currentBlock: HTMLElement | null = null;
+            while (node && node !== el) {
+              if (node.nodeType === 1 && node.parentElement === el) {
+                currentBlock = node as HTMLElement;
+                break;
+              }
+              node = node.parentNode;
+            }
+            if (currentBlock && currentBlock.hasAttribute("data-margin-marker")) {
+              const text = (currentBlock.textContent || "").trim();
+              if (!text) {
+                e.preventDefault();
+                currentBlock.removeAttribute("data-margin-marker");
+                currentBlock.removeAttribute("data-margin-type");
+                currentBlock.removeAttribute("data-margin-color");
+                currentBlock.style.removeProperty("--marker-color");
+                triggerChange();
+                return;
+              }
+            }
+
             const prev = anchor.previousSibling;
             if (
               prev &&
