@@ -1,0 +1,30 @@
+{
+  "concurrency": 1000,
+  "workloadDistribution": {
+    "light": 600,
+    "normal": 300,
+    "heavy": 100
+  },
+  "durationSeconds": 16.21,
+  "totalRequests": 9737,
+  "successfulRequests": 8994,
+  "failedRequests": 743,
+  "rps": 600.75,
+  "errorRatePercent": 7.63,
+  "avgReqPerUserPerMin": 36.05,
+  "avgCloudSavesPerUserPerMin": 13.15,
+  "avgProjectLoadsPerUserPerMin": 11.7,
+  "latencies": {
+    "p50": 18.35,
+    "p90": 50.65,
+    "p95": 88.32,
+    "p99": 177.33,
+    "max": 188.79,
+    "mean": 30.39
+  },
+  "errorDistribution": {
+    "HTTP_ERR_fetch failed": 743
+  },
+  "dataIntegrityFailures": 0,
+  "degradationLevel": "LEVEL_2_UNSTABLE"
+}

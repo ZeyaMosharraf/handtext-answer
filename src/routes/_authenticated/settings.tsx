@@ -158,16 +158,12 @@ function SettingsPage() {
       <Card className="mt-5 space-y-4 p-6">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Account</h2>
-          <Badge>{plan.name} plan</Badge>
+          <Badge>Free Launch Access</Badge>
         </div>
         <p className="text-sm text-muted-foreground">
-          {projects?.length ?? 0} project{projects?.length === 1 ? "" : "s"} · {pagesGenerated} pages generated
-          {plan.monthlyPageLimit ? ` of ${plan.monthlyPageLimit} included each month` : " · unlimited pages"}
+          {projects?.length ?? 0} project{projects?.length === 1 ? "" : "s"} · {pagesGenerated} pages generated · Unlimited pages
         </p>
         <div className="flex flex-wrap gap-2">
-          <Link to="/pricing">
-            <Button variant="outline">View plans</Button>
-          </Link>
           <Button
             variant="ghost"
             onClick={async () => {

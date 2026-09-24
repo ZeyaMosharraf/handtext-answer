@@ -1,0 +1,28 @@
+{
+  "concurrency": 400,
+  "workloadDistribution": {
+    "light": 240,
+    "normal": 120,
+    "heavy": 40
+  },
+  "durationSeconds": 0.297,
+  "totalRequests": 2121,
+  "successfulRequests": 1823,
+  "failedRequests": 298,
+  "rps": 7150.72,
+  "errorRatePercent": 14.05,
+  "latencies": {
+    "min": 9.44,
+    "p50": 41.67,
+    "p90": 65.05,
+    "p95": 74.55,
+    "p99": 81.41,
+    "max": 98.03,
+    "mean": 44.34
+  },
+  "errorDistribution": {
+    "HTTP_503_Unknown": 298
+  },
+  "dataIntegrityFailures": 0,
+  "degradationLevel": "LEVEL_3_BROKEN"
+}

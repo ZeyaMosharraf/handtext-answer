@@ -1,0 +1,26 @@
+{
+  "concurrency": 200,
+  "workloadDistribution": {
+    "light": 120,
+    "normal": 60,
+    "heavy": 20
+  },
+  "durationSeconds": 0.186,
+  "totalRequests": 1160,
+  "successfulRequests": 1160,
+  "failedRequests": 0,
+  "rps": 6227.7,
+  "errorRatePercent": 0,
+  "latencies": {
+    "min": 14.11,
+    "p50": 29.16,
+    "p90": 34.89,
+    "p95": 35.38,
+    "p99": 37.86,
+    "max": 40.02,
+    "mean": 27.33
+  },
+  "errorDistribution": {},
+  "dataIntegrityFailures": 0,
+  "degradationLevel": "LEVEL_0_HEALTHY"
+}

@@ -1,0 +1,54 @@
+# HandText Robots.txt
+# Production Site: https://handtext-answer.vercel.app/
+
+User-agent: *
+Allow: /
+Disallow: /dashboard/
+Disallow: /editor/
+Disallow: /settings/
+Disallow: /auth/
+Disallow: /_authenticated/
+Disallow: /api/
+
+# OpenAI Search & Generative AI Discovery
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /dashboard/
+Disallow: /editor/
+Disallow: /settings/
+Disallow: /auth/
+Disallow: /_authenticated/
+Disallow: /api/
+
+# OpenAI Model Crawlers
+User-agent: GPTBot
+Allow: /
+Disallow: /dashboard/
+Disallow: /editor/
+Disallow: /settings/
+Disallow: /auth/
+Disallow: /_authenticated/
+Disallow: /api/
+
+# Googlebot
+User-agent: Googlebot
+Allow: /
+Disallow: /dashboard/
+Disallow: /editor/
+Disallow: /settings/
+Disallow: /auth/
+Disallow: /_authenticated/
+Disallow: /api/
+
+# Bingbot
+User-agent: Bingbot
+Allow: /
+Disallow: /dashboard/
+Disallow: /editor/
+Disallow: /settings/
+Disallow: /auth/
+Disallow: /_authenticated/
+Disallow: /api/
+
+# Canonical Sitemap Reference
+Sitemap: https://handtext-answer.vercel.app/sitemap.xml

@@ -11,58 +11,27 @@ export interface Plan {
 }
 
 /**
- * Plan definitions live in one place so limits stay configurable and are never
- * scattered as hardcoded business rules across the UI.
+ * Plan definitions live in one place so limits stay configurable.
+ * For the current launch validation period, HandText operates on free access.
+ * Paid subscriptions are disabled until payment infrastructure is activated.
  */
 export const PLANS: Plan[] = [
   {
     id: "free",
-    name: "Free",
+    name: "Free Access",
     price: "₹0",
-    period: "/month",
-    tagline: "Try it on your next assignment.",
-    features: [
-      "Up to 20 pages per month",
-      "3 handwriting styles",
-      "Basic customisation",
-      "PDF and PNG export",
-      "Small watermark",
-    ],
-    cta: "Start free",
-    monthlyPageLimit: 20,
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    price: "₹399",
-    period: "/month",
-    tagline: "For regular assignment writing.",
+    period: "",
+    tagline: "Full access during public launch validation.",
     features: [
       "Unlimited pages",
       "All handwriting styles",
-      "Advanced customisation",
-      "High-resolution exports",
-      "No watermark",
-      "Saved projects and autosave",
+      "Ruled, blank & grid paper",
+      "LaTeX math equations & tables",
+      "High-resolution PDF & PNG exports",
+      "Cloud project save & autosave",
     ],
-    cta: "Go Pro",
-    highlighted: true,
+    cta: "Start Free",
     monthlyPageLimit: null,
-  },
-  {
-    id: "student",
-    name: "Student",
-    price: "₹199",
-    period: "/month",
-    tagline: "Verified students, half price.",
-    features: [
-      "Everything in Pro",
-      "500 pages per month",
-      "Student email verification",
-      "Priority generation",
-    ],
-    cta: "Get student plan",
-    monthlyPageLimit: 500,
   },
 ];
 

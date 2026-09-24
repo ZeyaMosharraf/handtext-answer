@@ -14,6 +14,8 @@ import appCss from "../styles.css?url";
 
 import { supabase } from "@/integrations/supabase/client";
 import { ThemeProvider, useTheme } from "@/lib/theme";
+import { ConsentBanner } from "@/components/ConsentBanner";
+import { initGoogleAnalytics, trackPageView } from "@/lib/analytics";
 
 function NotFoundComponent() {
   return (
@@ -126,12 +128,28 @@ function RootContent() {
   const router = useRouter();
 
   useEffect(() => {
+    // Attempt analytics initialization (will only execute if user granted consent)
+    initGoogleAnalytics();
+
+    // Track initial page view
+    trackPageView(window.location.pathname, document.title);
+
+    // Track SPA route transitions
+    const unsubscribeRouter = router.subscribe("onResolved", (event) => {
+      const path = event.toLocation.pathname;
+      trackPageView(path, document.title);
+    });
+
     const { data } = supabase.auth.onAuthStateChange((event) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       router.invalidate();
       if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
     });
-    return () => data.subscription.unsubscribe();
+
+    return () => {
+      unsubscribeRouter();
+      data.subscription.unsubscribe();
+    };
   }, [router, queryClient]);
 
   return (
@@ -139,6 +157,7 @@ function RootContent() {
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
       <ThemedToaster />
+      <ConsentBanner />
     </QueryClientProvider>
   );
 }

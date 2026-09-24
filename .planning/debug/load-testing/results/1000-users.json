@@ -1,0 +1,29 @@
+{
+  "concurrency": 1000,
+  "workloadDistribution": {
+    "light": 600,
+    "normal": 300,
+    "heavy": 100
+  },
+  "durationSeconds": 0.574,
+  "totalRequests": 4361,
+  "successfulRequests": 3328,
+  "failedRequests": 1033,
+  "rps": 7603.12,
+  "errorRatePercent": 23.69,
+  "latencies": {
+    "min": 15.78,
+    "p50": 79.61,
+    "p90": 142.03,
+    "p95": 169.05,
+    "p99": 293.11,
+    "max": 334.22,
+    "mean": 84.8
+  },
+  "errorDistribution": {
+    "HTTP_503_Unknown": 829,
+    "HTTP_ERR_fetch failed": 204
+  },
+  "dataIntegrityFailures": 204,
+  "degradationLevel": "LEVEL_4_SAFETY_BOUNDARY"
+}

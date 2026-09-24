@@ -12,7 +12,14 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
-import { Route as PricingRouteImport } from './routes/pricing'
+import { Route as FaqRouteImport } from './routes/faq'
+import { Route as HandwritingGeneratorRouteImport } from './routes/handwriting-generator'
+import { Route as HandwrittenAssignmentGeneratorRouteImport } from './routes/handwritten-assignment-generator'
+import { Route as HandwrittenMathGeneratorRouteImport } from './routes/handwritten-math-generator'
+import { Route as HandwrittenNotesGeneratorRouteImport } from './routes/handwritten-notes-generator'
+import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as TermsRouteImport } from './routes/terms'
+import { Route as TextToHandwritingRouteImport } from './routes/text-to-handwriting'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedEditorProjectIdRouteImport } from './routes/_authenticated/editor.$projectId'
@@ -31,9 +38,47 @@ const AuthRoute = AuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PricingRoute = PricingRouteImport.update({
-  id: '/pricing',
-  path: '/pricing',
+const FaqRoute = FaqRouteImport.update({
+  id: '/faq',
+  path: '/faq',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HandwritingGeneratorRoute = HandwritingGeneratorRouteImport.update({
+  id: '/handwriting-generator',
+  path: '/handwriting-generator',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HandwrittenAssignmentGeneratorRoute =
+  HandwrittenAssignmentGeneratorRouteImport.update({
+    id: '/handwritten-assignment-generator',
+    path: '/handwritten-assignment-generator',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const HandwrittenMathGeneratorRoute =
+  HandwrittenMathGeneratorRouteImport.update({
+    id: '/handwritten-math-generator',
+    path: '/handwritten-math-generator',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const HandwrittenNotesGeneratorRoute =
+  HandwrittenNotesGeneratorRouteImport.update({
+    id: '/handwritten-notes-generator',
+    path: '/handwritten-notes-generator',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TextToHandwritingRoute = TextToHandwritingRouteImport.update({
+  id: '/text-to-handwriting',
+  path: '/text-to-handwriting',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
@@ -56,7 +101,14 @@ const AuthenticatedEditorProjectIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
-  '/pricing': typeof PricingRoute
+  '/faq': typeof FaqRoute
+  '/handwriting-generator': typeof HandwritingGeneratorRoute
+  '/handwritten-assignment-generator': typeof HandwrittenAssignmentGeneratorRoute
+  '/handwritten-math-generator': typeof HandwrittenMathGeneratorRoute
+  '/handwritten-notes-generator': typeof HandwrittenNotesGeneratorRoute
+  '/privacy': typeof PrivacyRoute
+  '/terms': typeof TermsRoute
+  '/text-to-handwriting': typeof TextToHandwritingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/editor/$projectId': typeof AuthenticatedEditorProjectIdRoute
@@ -64,7 +116,14 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
-  '/pricing': typeof PricingRoute
+  '/faq': typeof FaqRoute
+  '/handwriting-generator': typeof HandwritingGeneratorRoute
+  '/handwritten-assignment-generator': typeof HandwrittenAssignmentGeneratorRoute
+  '/handwritten-math-generator': typeof HandwrittenMathGeneratorRoute
+  '/handwritten-notes-generator': typeof HandwrittenNotesGeneratorRoute
+  '/privacy': typeof PrivacyRoute
+  '/terms': typeof TermsRoute
+  '/text-to-handwriting': typeof TextToHandwritingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/editor/$projectId': typeof AuthenticatedEditorProjectIdRoute
@@ -74,7 +133,14 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
-  '/pricing': typeof PricingRoute
+  '/faq': typeof FaqRoute
+  '/handwriting-generator': typeof HandwritingGeneratorRoute
+  '/handwritten-assignment-generator': typeof HandwrittenAssignmentGeneratorRoute
+  '/handwritten-math-generator': typeof HandwrittenMathGeneratorRoute
+  '/handwritten-notes-generator': typeof HandwrittenNotesGeneratorRoute
+  '/privacy': typeof PrivacyRoute
+  '/terms': typeof TermsRoute
+  '/text-to-handwriting': typeof TextToHandwritingRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/editor/$projectId': typeof AuthenticatedEditorProjectIdRoute
@@ -84,7 +150,14 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
-    | '/pricing'
+    | '/faq'
+    | '/handwriting-generator'
+    | '/handwritten-assignment-generator'
+    | '/handwritten-math-generator'
+    | '/handwritten-notes-generator'
+    | '/privacy'
+    | '/terms'
+    | '/text-to-handwriting'
     | '/dashboard'
     | '/settings'
     | '/editor/$projectId'
@@ -92,7 +165,14 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
-    | '/pricing'
+    | '/faq'
+    | '/handwriting-generator'
+    | '/handwritten-assignment-generator'
+    | '/handwritten-math-generator'
+    | '/handwritten-notes-generator'
+    | '/privacy'
+    | '/terms'
+    | '/text-to-handwriting'
     | '/dashboard'
     | '/settings'
     | '/editor/$projectId'
@@ -101,7 +181,14 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
-    | '/pricing'
+    | '/faq'
+    | '/handwriting-generator'
+    | '/handwritten-assignment-generator'
+    | '/handwritten-math-generator'
+    | '/handwritten-notes-generator'
+    | '/privacy'
+    | '/terms'
+    | '/text-to-handwriting'
     | '/_authenticated/dashboard'
     | '/_authenticated/settings'
     | '/_authenticated/editor/$projectId'
@@ -111,7 +198,14 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
-  PricingRoute: typeof PricingRoute
+  FaqRoute: typeof FaqRoute
+  HandwritingGeneratorRoute: typeof HandwritingGeneratorRoute
+  HandwrittenAssignmentGeneratorRoute: typeof HandwrittenAssignmentGeneratorRoute
+  HandwrittenMathGeneratorRoute: typeof HandwrittenMathGeneratorRoute
+  HandwrittenNotesGeneratorRoute: typeof HandwrittenNotesGeneratorRoute
+  PrivacyRoute: typeof PrivacyRoute
+  TermsRoute: typeof TermsRoute
+  TextToHandwritingRoute: typeof TextToHandwritingRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -137,11 +231,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/pricing': {
-      id: '/pricing'
-      path: '/pricing'
-      fullPath: '/pricing'
-      preLoaderRoute: typeof PricingRouteImport
+    '/faq': {
+      id: '/faq'
+      path: '/faq'
+      fullPath: '/faq'
+      preLoaderRoute: typeof FaqRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/handwriting-generator': {
+      id: '/handwriting-generator'
+      path: '/handwriting-generator'
+      fullPath: '/handwriting-generator'
+      preLoaderRoute: typeof HandwritingGeneratorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/handwritten-assignment-generator': {
+      id: '/handwritten-assignment-generator'
+      path: '/handwritten-assignment-generator'
+      fullPath: '/handwritten-assignment-generator'
+      preLoaderRoute: typeof HandwrittenAssignmentGeneratorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/handwritten-math-generator': {
+      id: '/handwritten-math-generator'
+      path: '/handwritten-math-generator'
+      fullPath: '/handwritten-math-generator'
+      preLoaderRoute: typeof HandwrittenMathGeneratorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/handwritten-notes-generator': {
+      id: '/handwritten-notes-generator'
+      path: '/handwritten-notes-generator'
+      fullPath: '/handwritten-notes-generator'
+      preLoaderRoute: typeof HandwrittenNotesGeneratorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/text-to-handwriting': {
+      id: '/text-to-handwriting'
+      path: '/text-to-handwriting'
+      fullPath: '/text-to-handwriting'
+      preLoaderRoute: typeof TextToHandwritingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/dashboard': {
@@ -187,7 +330,14 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
-  PricingRoute: PricingRoute,
+  FaqRoute: FaqRoute,
+  HandwritingGeneratorRoute: HandwritingGeneratorRoute,
+  HandwrittenAssignmentGeneratorRoute: HandwrittenAssignmentGeneratorRoute,
+  HandwrittenMathGeneratorRoute: HandwrittenMathGeneratorRoute,
+  HandwrittenNotesGeneratorRoute: HandwrittenNotesGeneratorRoute,
+  PrivacyRoute: PrivacyRoute,
+  TermsRoute: TermsRoute,
+  TextToHandwritingRoute: TextToHandwritingRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
