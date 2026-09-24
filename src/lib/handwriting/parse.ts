@@ -1,6 +1,6 @@
 import type { ColumnAlignment } from "./types";
 import type { GraphDefinition } from "../graph/types";
-import type { MarginMarker, MarginMarkerType } from "@/types/document";
+import type { MarginMarker, MarginMarkerType, DocumentBlock } from "@/types/document";
 
 export type BlockKind =
   | "heading"
@@ -40,6 +40,28 @@ function rgbToHex(rgbStr: string): string | null {
   const g = parseInt(m[2], 10).toString(16).padStart(2, "0");
   const b = parseInt(m[3], 10).toString(16).padStart(2, "0");
   return `#${r}${g}${b}`;
+}
+
+/**
+ * Safely extracts an attribute value from an HTML tag string or attribute list.
+ * Respects quote pairing: an attribute opened with " can contain literal ' without truncating,
+ * and an attribute opened with ' can contain literal " without truncating.
+ */
+export function matchAttr(tagOrAttrs: string, attrName: string): string | null {
+  const re = new RegExp(`${attrName}=(?:(["'])([\\s\\S]*?)\\1|([^\\s>]+))`, "i");
+  const match = tagOrAttrs.match(re);
+  if (!match) return null;
+  return match[2] !== undefined ? match[2] : (match[3] ?? null);
+}
+
+export function escapeHtml(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function extractScale(attrs: string, tag: string): number | undefined {
@@ -152,6 +174,8 @@ export interface GraphBlockData {
 }
 
 export interface Block {
+  /** Stable block ID if preserved across editor or serialization */
+  id?: string | undefined;
   kind: BlockKind;
   text: string;
   segs?: Seg[];
@@ -363,19 +387,18 @@ export function parseInlineHtml(innerHtml: string): Seg[] {
 }
 
 function extractMarginMarker(attrs: string): MarginMarker | undefined {
-  const textMatch = attrs.match(/data-margin-marker=["']([^"']*)["']/i);
-  if (!textMatch || !textMatch[1]) return undefined;
-  const typeMatch = attrs.match(/data-margin-type=["']([^"']*)["']/i);
-  const colorMatch = attrs.match(/data-margin-color=["']([^"']*)["']/i);
+  const textVal = matchAttr(attrs, "data-margin-marker");
+  if (!textVal || !textVal.trim()) return undefined;
+  const rawType = matchAttr(attrs, "data-margin-type") || "custom";
+  const colorVal = matchAttr(attrs, "data-margin-color");
   const validTypes: MarginMarkerType[] = ["question", "answer", "subquestion", "marks", "custom"];
-  const rawType = typeMatch?.[1] || "custom";
   const type: MarginMarkerType = validTypes.includes(rawType as MarginMarkerType)
     ? (rawType as MarginMarkerType)
     : "custom";
   return {
     type,
-    text: unescapeHtml(textMatch[1]),
-    ...(colorMatch?.[1] ? { color: unescapeHtml(colorMatch[1]) } : {}),
+    text: unescapeHtml(textVal),
+    ...(colorVal ? { color: unescapeHtml(colorVal) } : {}),
   };
 }
 
@@ -426,13 +449,13 @@ function stripTextBlockWrappers(html: string): string {
     }
     if (endIdx !== -1) {
       let innerContent = res.slice(startIdx + tagLen, endIdx);
-      const markerMatch = openTag.match(/data-margin-marker=["']([^"']*)["']/i);
-      const typeMatch = openTag.match(/data-margin-type=["']([^"']*)["']/i);
-      const colorMatch = openTag.match(/data-margin-color=["']([^"']*)["']/i);
-      if (markerMatch && !innerContent.includes("data-margin-marker")) {
-        const markerAttrs = ` data-margin-marker="${markerMatch[1]}"` +
-          (typeMatch ? ` data-margin-type="${typeMatch[1]}"` : "") +
-          (colorMatch ? ` data-margin-color="${colorMatch[1]}"` : "");
+      const markerText = matchAttr(openTag, "data-margin-marker");
+      const markerType = matchAttr(openTag, "data-margin-type");
+      const markerColor = matchAttr(openTag, "data-margin-color");
+      if (markerText && !innerContent.includes("data-margin-marker")) {
+        const markerAttrs = ` data-margin-marker="${markerText}"` +
+          (markerType ? ` data-margin-type="${markerType}"` : "") +
+          (markerColor ? ` data-margin-color="${markerColor}"` : "");
         if (/<(h1|h2|h3|h4|blockquote|table|ul|ol|p|div|pre)\b/i.test(innerContent)) {
           innerContent = innerContent.replace(/<(h1|h2|h3|h4|blockquote|table|ul|ol|p|div|pre)([^>]*)>/i, `<$1$2${markerAttrs}>`);
         } else {
@@ -449,42 +472,201 @@ function stripTextBlockWrappers(html: string): string {
 }
 
 /**
+ * Normalizes HTML by hoisting block-level elements (math-block, graph-block, table)
+ * out of enclosing <p> tags so that sequential blocks are cleanly parsed without truncation.
+ */
+export function unnestBlockElements(html: string): string {
+  const blockElementPattern = /<(?:div\b((?:[^"'>]|(["'])[\s\S]*?\2)*)>([\s\S]*?)<\/div>|table\b((?:[^"'>]|(["'])[\s\S]*?\5)*)>([\s\S]*?)<\/table>)/gi;
+
+  return html.replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, (fullP, pAttrs, pInner) => {
+    if (
+      !pInner.includes("math-block") &&
+      !pInner.includes("graph-block") &&
+      !pInner.includes("data-block-type") &&
+      !pInner.includes("data-latex") &&
+      !pInner.includes("<table")
+    ) {
+      return fullP;
+    }
+
+    blockElementPattern.lastIndex = 0;
+    const parts: string[] = [];
+    let lastIdx = 0;
+    let bMatch: RegExpExecArray | null;
+    let found = false;
+
+    while ((bMatch = blockElementPattern.exec(pInner)) !== null) {
+      const fullBlockMatch = bMatch[0];
+      const isBlock =
+        fullBlockMatch.startsWith("<table") ||
+        /class=(["'])[\s\S]*?(?:math-block|graph-block)[\s\S]*?\1/i.test(fullBlockMatch) ||
+        /data-block-type=(["'])(?:math|graph|table)\1/i.test(fullBlockMatch) ||
+        /data-latex=/i.test(fullBlockMatch) ||
+        /data-graph-definition=/i.test(fullBlockMatch);
+
+      if (!isBlock) {
+        continue;
+      }
+
+      found = true;
+      const before = pInner.slice(lastIdx, bMatch.index);
+      const cleanBefore = before.replace(/<br\s*\/?>/gi, "").trim();
+      if (cleanBefore) {
+        parts.push(`<p${pAttrs}>${before}</p>`);
+      }
+      parts.push(fullBlockMatch);
+      lastIdx = blockElementPattern.lastIndex;
+    }
+
+    if (!found) {
+      return fullP;
+    }
+
+    const after = pInner.slice(lastIdx);
+    const cleanAfter = after.replace(/<br\s*\/?>/gi, "").trim();
+    if (cleanAfter) {
+      parts.push(`<p${pAttrs}>${after}</p>`);
+    }
+
+    return parts.join("\n");
+  });
+}
+
+/**
+ * Extracts structured TableData from raw HTML <table> markup.
+ * Parses rows, headers (<th>), cell inline segments, and column alignments.
+ */
+export function parseTableHtml(tableHtml: string): TableData | undefined {
+  const rows: TableCellData[][] = [];
+  let headerRow = false;
+  const alignments: ColumnAlignment[] = [];
+  const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let trMatch: RegExpExecArray | null;
+  let rowIndex = 0;
+
+  while ((trMatch = trRe.exec(tableHtml)) !== null) {
+    const trContent = trMatch[1] ?? "";
+    const cellRe = /<(td|th)([^>]*)>([\s\S]*?)<\/\1>/gi;
+    let cellMatch: RegExpExecArray | null;
+    const rowCells: TableCellData[] = [];
+    let hasTh = false;
+    let colIndex = 0;
+
+    while ((cellMatch = cellRe.exec(trContent)) !== null) {
+      const isTh = cellMatch[1]?.toLowerCase() === "th";
+      if (isTh) hasTh = true;
+      const attrs = cellMatch[2] ?? "";
+      const rawCellHtml = cellMatch[3] ?? "";
+
+      // Extract column alignment
+      if (rowIndex === 0 || !alignments[colIndex]) {
+        let colAlign: ColumnAlignment = "left";
+        const alignAttr = attrs.match(/align=["']?(left|center|right)["']?/i);
+        const styleAlign = attrs.match(/text-align:\s*(left|center|right)/i);
+        const dataAlign = attrs.match(/data-align=["']?(left|center|right)["']?/i);
+        const classAlign = attrs.match(/\btext-(left|center|right)\b/i);
+
+        const matched = (alignAttr?.[1] || styleAlign?.[1] || dataAlign?.[1] || classAlign?.[1])?.toLowerCase();
+        if (matched === "center" || matched === "right" || matched === "left") {
+          colAlign = matched;
+        }
+        alignments[colIndex] = colAlign;
+      }
+
+      // Normalize container tags inside cell to line breaks, preserving spans, styles, and inline markup
+      const normalizedCellHtml = rawCellHtml
+        .replace(/<br\s*\/?>/gi, "<br>")
+        .replace(/<\/p>\s*<p[^>]*>/gi, "<br>")
+        .replace(/<\/div>\s*<div[^>]*>/gi, "<br>")
+        .replace(/<\/?(p|div)[^>]*>/gi, "")
+        .replace(/\r/g, "");
+
+      // Parse full inline formatting (color, scale, bold, italic, underline, highlight, newlines)
+      const segs = parseInlineHtml(normalizedCellHtml);
+      const cellText = segText(segs).replace(/\n+$/, "");
+
+      rowCells.push({ text: cellText, segs });
+      colIndex++;
+    }
+
+    if (rowIndex === 0 && hasTh) headerRow = true;
+    if (rowCells.length > 0) rows.push(rowCells);
+    rowIndex++;
+  }
+
+  if (rows.length === 0) return undefined;
+  return { rows, headerRow, alignments };
+}
+
+/** Converts TableData to clean semantic HTML. */
+export function tableDataToHtml(t: TableData): string {
+  const rowsHtml = t.rows
+    .map((row, rIdx) => {
+      const tag = rIdx === 0 && t.headerRow ? "th" : "td";
+      const cells = row
+        .map((cell, cIdx) => {
+          const align = t.alignments?.[cIdx];
+          const alignAttr = align && align !== "left" ? ` data-align="${align}" style="text-align: ${align};"` : "";
+          const cellHtml =
+            typeof cell === "string"
+              ? escapeHtml(cell)
+              : cell?.segs && cell.segs.length > 0
+              ? segsToHtml(cell.segs)
+              : escapeHtml(cell?.text || "");
+          return `<${tag}${alignAttr}>${cellHtml}</${tag}>`;
+        })
+        .join("");
+      return `<tr>${cells}</tr>`;
+    })
+    .join("");
+  return `<table><tbody>${rowsHtml}</tbody></table>`;
+}
+
+/**
  * Parses structured HTML from the rich text editor directly into Block[] and Seg[]
  * runs without intermediate markdown syntax or markers. Works universally in browser and Node/SSR.
  */
 export function parseHtmlContent(
   html: string,
-  mathBlocksMap = new Map<string, { latex: string; color?: string | undefined }>(),
-  graphBlocksMap = new Map<string, string>(),
+  mathBlocksMap = new Map<string, { latex: string; color?: string | undefined; id?: string | undefined }>(),
+  graphBlocksMap = new Map<string, { defStr: string; id?: string | undefined }>(),
 ): Block[] {
   const blocks: Block[] = [];
 
-  // Unwrap any top-level text block container divs so nested div boundaries never truncate regex
-  const unwrappedHtml = stripTextBlockWrappers(html);
+  // Unwrap any top-level text block container divs and hoist blocks trapped in <p> tags
+  const unwrappedHtml = unnestBlockElements(stripTextBlockWrappers(html));
 
   function extractMarkerAttributesString(tagStr: string): string {
-    const markerMatch = tagStr.match(/data-margin-marker=["']([^"']*)["']/i);
-    if (!markerMatch || !markerMatch[1]) return "";
-    const typeMatch = tagStr.match(/data-margin-type=["']([^"']*)["']/i);
-    const colorMatch = tagStr.match(/data-margin-color=["']([^"']*)["']/i);
+    const marker = matchAttr(tagStr, "data-margin-marker");
+    const type = matchAttr(tagStr, "data-margin-type");
+    const color = matchAttr(tagStr, "data-margin-color");
+    const blockId = matchAttr(tagStr, "data-block-id");
     return (
-      ` data-margin-marker="${markerMatch[1]}"` +
-      (typeMatch?.[1] ? ` data-margin-type="${typeMatch[1]}"` : "") +
-      (colorMatch?.[1] ? ` data-margin-color="${colorMatch[1]}"` : "")
+      (blockId ? ` data-block-id="${blockId}"` : "") +
+      (marker ? ` data-margin-marker="${marker}"` : "") +
+      (type ? ` data-margin-type="${type}"` : "") +
+      (color ? ` data-margin-color="${color}"` : "")
     );
   }
 
   // Pre-extract math blocks so nested <div> wrappers in contenteditable never truncate blockRegex
   let mathCounter = mathBlocksMap.size;
   let tokenizedHtml = unwrappedHtml.replace(
-    /<div[^>]*?(?:class=["'][^"']*math-block[^"']*["']|data-block-type=["']math["'])[^>]*data-latex=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>|<div[^>]*data-latex=["']([^"']*)["'][^>]*?(?:class=["'][^"']*math-block[^"']*["']|data-block-type=["']math["'])[^>]*>[\s\S]*?<\/div>/gi,
-    (fullMatch, latex1, latex2) => {
-      const latex = unescapeHtml(latex1 || latex2 || "");
-      const colorMatch = fullMatch.match(/data-color=["']([^"']*)["']/i);
-      const color = colorMatch ? unescapeHtml(colorMatch[1] ?? "") : undefined;
+    /<div\b((?:[^"'>]|(["'])[\s\S]*?\2)*)>([\s\S]*?)<\/div>/gi,
+    (fullMatch, attrs, _q, inner) => {
+      const isMath =
+        /class=(["'])[\s\S]*?math-block[\s\S]*?\1/i.test(attrs) ||
+        /data-block-type=(["'])math\1/i.test(attrs) ||
+        matchAttr(attrs, "data-latex") !== null;
+      if (!isMath) return fullMatch;
+      const rawId = matchAttr(attrs, "data-block-id");
+      const rawLatex = matchAttr(attrs, "data-latex");
+      const latex = unescapeHtml(rawLatex !== null ? rawLatex : (inner ? inner.trim() : ""));
+      const rawColor = matchAttr(attrs, "data-color");
+      const color = rawColor ? unescapeHtml(rawColor) : undefined;
       const markerAttrs = extractMarkerAttributesString(fullMatch);
       const token = `__MATH_BLOCK_TOKEN_${mathCounter++}__`;
-      mathBlocksMap.set(token, { latex, color });
+      mathBlocksMap.set(token, { latex, color, id: rawId ?? undefined });
       return `<p data-math-token="${token}"${markerAttrs}></p>`;
     },
   );
@@ -492,12 +674,19 @@ export function parseHtmlContent(
   // Pre-extract graph blocks
   let graphCounter = graphBlocksMap.size;
   tokenizedHtml = tokenizedHtml.replace(
-    /<div[^>]*?(?:class=["'][^"']*graph-block[^"']*["']|data-block-type=["']graph["'])[^>]*data-graph-definition=(["'])([\s\S]*?)\1[^>]*>[\s\S]*?<\/div>|<div[^>]*data-graph-definition=(["'])([\s\S]*?)\3[^>]*?(?:class=["'][^"']*graph-block[^"']*["']|data-block-type=["']graph["'])[^>]*>[\s\S]*?<\/div>/gi,
-    (fullMatch, _q1, def1, _q2, def2) => {
-      const defStr = unescapeHtml(def1 || def2 || "");
+    /<div\b((?:[^"'>]|(["'])[\s\S]*?\2)*)>([\s\S]*?)<\/div>/gi,
+    (fullMatch, attrs) => {
+      const isGraph =
+        /class=(["'])[\s\S]*?graph-block[\s\S]*?\1/i.test(attrs) ||
+        /data-block-type=(["'])graph\1/i.test(attrs) ||
+        matchAttr(attrs, "data-graph-definition") !== null;
+      if (!isGraph) return fullMatch;
+      const rawId = matchAttr(attrs, "data-block-id");
+      const rawDef = matchAttr(attrs, "data-graph-definition");
+      const defStr = unescapeHtml(rawDef || "");
       const markerAttrs = extractMarkerAttributesString(fullMatch);
       const token = `__GRAPH_BLOCK_TOKEN_${graphCounter++}__`;
-      graphBlocksMap.set(token, defStr);
+      graphBlocksMap.set(token, { defStr, id: rawId ?? undefined });
       return `<p data-graph-token="${token}"${markerAttrs}></p>`;
     },
   );
@@ -526,14 +715,16 @@ export function parseHtmlContent(
     const attrs = match[2] ?? "";
     const inner = match[3] ?? "";
     const marginMarker = extractMarginMarker(attrs);
+    const blockId = matchAttr(attrs, "data-block-id") ?? undefined;
 
     // Check if the block tag itself is a math-block token or container
-    const tokenMatch = attrs.match(/data-math-token=["']([^"']*)["']/i);
-    if (tokenMatch && mathBlocksMap.has(tokenMatch[1]!)) {
-      const data = mathBlocksMap.get(tokenMatch[1]!)!;
+    const token = matchAttr(attrs, "data-math-token");
+    if (token && mathBlocksMap.has(token)) {
+      const data = mathBlocksMap.get(token)!;
       const latex = data.latex;
       if (latex.trim()) {
         blocks.push({
+          id: data.id ?? blockId,
           kind: "math",
           text: latex,
           math: { latex, display: "block", ...(data.color ? { color: data.color } : {}) },
@@ -543,12 +734,13 @@ export function parseHtmlContent(
       continue;
     }
 
-    const latexAttrMatch = attrs.match(/data-latex=["']([^"']*)["']/i);
-    if (latexAttrMatch || attrs.includes("math-block")) {
-      const latex = latexAttrMatch ? unescapeHtml(latexAttrMatch[1] ?? "") : inner.trim();
-      const colorMatch = attrs.match(/data-color=["']([^"']*)["']/i);
-      const color = colorMatch ? unescapeHtml(colorMatch[1] ?? "") : undefined;
+    const rawLatex = matchAttr(attrs, "data-latex");
+    if (rawLatex !== null || attrs.includes("math-block")) {
+      const latex = rawLatex !== null ? unescapeHtml(rawLatex) : inner.trim();
+      const rawColor = matchAttr(attrs, "data-color");
+      const color = rawColor ? unescapeHtml(rawColor) : undefined;
       blocks.push({
+        id: blockId,
         kind: "math",
         text: latex,
         math: { latex, display: "block", ...(color ? { color } : {}) },
@@ -558,15 +750,17 @@ export function parseHtmlContent(
     }
 
     // Check if the block tag itself is a graph-block token or container
-    const graphTokenMatch = attrs.match(/data-graph-token=["']([^"']*)["']/i);
-    if (graphTokenMatch && graphBlocksMap.has(graphTokenMatch[1]!)) {
-      const defStr = graphBlocksMap.get(graphTokenMatch[1]!)!;
+    const graphToken = matchAttr(attrs, "data-graph-token");
+    if (graphToken && graphBlocksMap.has(graphToken)) {
+      const gData = graphBlocksMap.get(graphToken)!;
+      const defStr = gData.defStr;
       try {
         const definition = JSON.parse(defStr) as GraphDefinition;
         if (!definition.space) {
           definition.space = { xMin: -5, xMax: 5, yMin: -5, yMax: 5, showGrid: true, showAxisLabels: true, originVisible: true };
         }
         blocks.push({
+          id: gData.id ?? blockId,
           kind: "graph",
           text: defStr,
           graph: { definition },
@@ -578,15 +772,16 @@ export function parseHtmlContent(
       continue;
     }
 
-    const graphAttrMatch = attrs.match(/data-graph-definition=["']([^"']*)["']/i);
-    if (graphAttrMatch || (tag === "div" && attrs.includes("graph-block"))) {
-      const defStr = graphAttrMatch ? unescapeHtml(graphAttrMatch[1] ?? "") : inner.trim();
+    const rawGraphDef = matchAttr(attrs, "data-graph-definition");
+    if (rawGraphDef !== null || (tag === "div" && attrs.includes("graph-block"))) {
+      const defStr = rawGraphDef !== null ? unescapeHtml(rawGraphDef) : inner.trim();
       try {
         const definition = JSON.parse(defStr) as GraphDefinition;
         if (!definition.space) {
           definition.space = { xMin: -5, xMax: 5, yMin: -5, yMax: 5, showGrid: true, showAxisLabels: true, originVisible: true };
         }
         blocks.push({
+          id: blockId,
           kind: "graph",
           text: defStr,
           graph: { definition },
@@ -599,34 +794,42 @@ export function parseHtmlContent(
     }
 
     if (tag === "hr") {
-      blocks.push({ kind: "divider", text: "" });
+      blocks.push({ id: blockId, kind: "divider", text: "" });
       continue;
     }
 
     if (tag === "h1") {
       const segs = parseInlineHtml(inner);
-      blocks.push({ kind: "heading", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
+      blocks.push({ id: blockId, kind: "heading", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
       continue;
     }
 
     if (tag === "h2" || tag === "h3" || tag === "h4") {
       const segs = parseInlineHtml(inner);
-      blocks.push({ kind: "subheading", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
+      blocks.push({ id: blockId, kind: "subheading", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
       continue;
     }
 
     if (tag === "blockquote") {
       const segs = parseInlineHtml(inner);
-      blocks.push({ kind: "quote", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
+      blocks.push({ id: blockId, kind: "quote", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
       continue;
     }
 
     if (tag === "ul") {
       const liRe = /<li[^>]*>([\s\S]*?)<\/li>/gi;
       let liMatch: RegExpExecArray | null;
+      let bulletIdx = 0;
       while ((liMatch = liRe.exec(inner)) !== null) {
         const segs = parseInlineHtml(liMatch[1] ?? "");
-        blocks.push({ kind: "bullet", text: segText(segs), segs, marker: "•" });
+        blocks.push({
+          id: blockId ? (bulletIdx === 0 ? blockId : `${blockId}_${bulletIdx}`) : undefined,
+          kind: "bullet",
+          text: segText(segs),
+          segs,
+          marker: "•",
+        });
+        bulletIdx++;
       }
       continue;
     }
@@ -637,80 +840,35 @@ export function parseHtmlContent(
       let idx = 1;
       while ((liMatch = liRe.exec(inner)) !== null) {
         const segs = parseInlineHtml(liMatch[1] ?? "");
-        blocks.push({ kind: "numbered", text: segText(segs), segs, marker: `${idx++}.` });
+        blocks.push({
+          id: blockId ? (idx === 1 ? blockId : `${blockId}_${idx}`) : undefined,
+          kind: "numbered",
+          text: segText(segs),
+          segs,
+          marker: `${idx++}.`,
+        });
       }
       continue;
     }
 
     if (tag === "table") {
-      const rows: TableCellData[][] = [];
-      let headerRow = false;
-      const alignments: ColumnAlignment[] = [];
-      const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-      let trMatch: RegExpExecArray | null;
-      let rowIndex = 0;
-
-      while ((trMatch = trRe.exec(inner)) !== null) {
-        const trContent = trMatch[1] ?? "";
-        const cellRe = /<(td|th)([^>]*)>([\s\S]*?)<\/\1>/gi;
-        let cellMatch: RegExpExecArray | null;
-        const rowCells: TableCellData[] = [];
-        let hasTh = false;
-        let colIndex = 0;
-
-        while ((cellMatch = cellRe.exec(trContent)) !== null) {
-          const isTh = cellMatch[1]?.toLowerCase() === "th";
-          if (isTh) hasTh = true;
-          const attrs = cellMatch[2] ?? "";
-          const rawCellHtml = cellMatch[3] ?? "";
-
-          // Extract column alignment
-          if (rowIndex === 0 || !alignments[colIndex]) {
-            let colAlign: ColumnAlignment = "left";
-            const alignAttr = attrs.match(/align=["']?(left|center|right)["']?/i);
-            const styleAlign = attrs.match(/text-align:\s*(left|center|right)/i);
-            const dataAlign = attrs.match(/data-align=["']?(left|center|right)["']?/i);
-            const classAlign = attrs.match(/\btext-(left|center|right)\b/i);
-
-            const matched = (alignAttr?.[1] || styleAlign?.[1] || dataAlign?.[1] || classAlign?.[1])?.toLowerCase();
-            if (matched === "center" || matched === "right" || matched === "left") {
-              colAlign = matched;
-            }
-            alignments[colIndex] = colAlign;
-          }
-
-          // Normalize container tags inside cell to line breaks, preserving spans, styles, and inline markup
-          const normalizedCellHtml = rawCellHtml
-            .replace(/<br\s*\/?>/gi, "<br>")
-            .replace(/<\/p>\s*<p[^>]*>/gi, "<br>")
-            .replace(/<\/div>\s*<div[^>]*>/gi, "<br>")
-            .replace(/<\/?(p|div)[^>]*>/gi, "")
-            .replace(/\r/g, "");
-
-          // Parse full inline formatting (color, scale, bold, italic, underline, highlight, newlines)
-          const segs = parseInlineHtml(normalizedCellHtml);
-          const cellText = segText(segs).replace(/\n+$/, "");
-
-          rowCells.push({ text: cellText, segs });
-          colIndex++;
-        }
-
-        if (rowIndex === 0 && hasTh) headerRow = true;
-        if (rowCells.length > 0) rows.push(rowCells);
-        rowIndex++;
-      }
-
-      if (rows.length > 0) {
-        blocks.push({ kind: "table", text: "", table: { rows, headerRow, alignments }, ...(marginMarker ? { marginMarker } : {}) });
+      const parsedTable = parseTableHtml(match[0]);
+      if (parsedTable) {
+        blocks.push({
+          id: blockId,
+          kind: "table",
+          text: "",
+          table: parsedTable,
+          ...(marginMarker ? { marginMarker } : {}),
+        });
       }
       continue;
     }
 
     // Math display block: <div class="math-block" data-latex="...">...</div>
     if (tag === "div" && /math-block/i.test(match[2] ?? "")) {
-      const latexMatch = (match[2] ?? "").match(/data-latex=["']([^"']*)["']/i)
-        ?? inner.match(/data-latex=["']([^"']*)["']/i);
-      const latex = latexMatch ? latexMatch[1]! : "";
+      const latexVal = matchAttr(match[2] ?? "", "data-latex") ?? matchAttr(inner, "data-latex") ?? "";
+      const latex = unescapeHtml(latexVal);
       if (latex.trim()) {
         blocks.push({ kind: "math", text: latex, math: { latex, display: "block" }, ...(marginMarker ? { marginMarker } : {}) });
       }
@@ -726,7 +884,7 @@ export function parseHtmlContent(
       // Check if inner contains nested math-block elements or math tokens
       if (inner.includes("data-math-token") || inner.includes("math-block") || inner.includes("data-latex")) {
         const mathPattern =
-          /<p[^>]*data-math-token=["']([^"']*)["'][^>]*><\/p>|<div[^>]*?(?:class=["'][^"']*math-block[^"']*["']|data-latex=["']([^"']*)["'])[^>]*>[\s\S]*?<\/div>/gi;
+          /<p\b[^>]*data-math-token=(["'])([\s\S]*?)\1[^>]*><\/p>|<div\b((?:[^"'>]|(["'])[\s\S]*?\4)*)>([\s\S]*?)<\/div>/gi;
         let lastInnerIdx = 0;
         let mMatch: RegExpExecArray | null;
         while ((mMatch = mathPattern.exec(inner)) !== null) {
@@ -738,20 +896,24 @@ export function parseHtmlContent(
           }
           let latex = "";
           let mathColor: string | undefined = undefined;
-          const token = mMatch[1];
+          let mBlockId: string | undefined = undefined;
+          const divOrP = mMatch[0];
+          const token = matchAttr(divOrP, "data-math-token");
           if (token && mathBlocksMap.has(token)) {
             const data = mathBlocksMap.get(token)!;
             latex = data.latex;
             mathColor = data.color;
+            mBlockId = data.id;
           } else {
-            const divTag = mMatch[0];
-            const lMatch = divTag.match(/data-latex=["']([^"']*)["']/i);
-            const cMatch = divTag.match(/data-color=["']([^"']*)["']/i);
-            latex = lMatch ? unescapeHtml(lMatch[1] ?? "") : "";
-            mathColor = cMatch ? unescapeHtml(cMatch[1] ?? "") : undefined;
+            const lVal = matchAttr(divOrP, "data-latex");
+            const cVal = matchAttr(divOrP, "data-color");
+            latex = lVal ? unescapeHtml(lVal) : "";
+            mathColor = cVal ? unescapeHtml(cVal) : undefined;
+            mBlockId = matchAttr(divOrP, "data-block-id") ?? undefined;
           }
           if (latex) {
             blocks.push({
+              id: mBlockId ?? blockId,
               kind: "math",
               text: latex,
               math: { latex, display: "block", ...(mathColor ? { color: mathColor } : {}) },
@@ -771,7 +933,7 @@ export function parseHtmlContent(
       // Check if inner contains nested graph-block elements or graph tokens
       if (inner.includes("data-graph-token") || inner.includes("graph-block") || inner.includes("data-graph-definition")) {
         const graphPattern =
-          /<p[^>]*data-graph-token=["']([^"']*)["'][^>]*><\/p>|<div[^>]*?(?:class=["'][^"']*graph-block[^"']*["']|data-graph-definition=["']([^"']*)["'])[^>]*>[\s\S]*?<\/div>/gi;
+          /<p\b[^>]*data-graph-token=(["'])([\s\S]*?)\1[^>]*><\/p>|<div\b((?:[^"'>]|(["'])[\s\S]*?\4)*)>([\s\S]*?)<\/div>/gi;
         let lastInnerIdx = 0;
         let gMatch: RegExpExecArray | null;
         while ((gMatch = graphPattern.exec(inner)) !== null) {
@@ -782,13 +944,17 @@ export function parseHtmlContent(
             blocks.push({ kind: "paragraph", text: segText(beforeSegs), segs: beforeSegs });
           }
           let defStr = "";
-          const token = gMatch[1];
+          let gBlockId: string | undefined = undefined;
+          const divOrP = gMatch[0];
+          const token = matchAttr(divOrP, "data-graph-token");
           if (token && graphBlocksMap.has(token)) {
-            defStr = graphBlocksMap.get(token)!;
+            const gData = graphBlocksMap.get(token)!;
+            defStr = gData.defStr;
+            gBlockId = gData.id;
           } else {
-            const divTag = gMatch[0];
-            const dMatch = divTag.match(/data-graph-definition=["']([^"']*)["']/i);
-            defStr = dMatch ? unescapeHtml(dMatch[1] ?? "") : "";
+            const dVal = matchAttr(divOrP, "data-graph-definition");
+            defStr = dVal ? unescapeHtml(dVal) : "";
+            gBlockId = matchAttr(divOrP, "data-block-id") ?? undefined;
           }
           if (defStr) {
             try {
@@ -796,7 +962,7 @@ export function parseHtmlContent(
               if (!definition.space) {
                 definition.space = { xMin: -5, xMax: 5, yMin: -5, yMax: 5, showGrid: true, showAxisLabels: true, originVisible: true };
               }
-              blocks.push({ kind: "graph", text: defStr, graph: { definition } });
+              blocks.push({ id: gBlockId ?? blockId, kind: "graph", text: defStr, graph: { definition } });
             } catch {
               // Silently skip corrupted JSON
             }
@@ -815,9 +981,9 @@ export function parseHtmlContent(
       const cleanInner = inner.trim();
       if (!cleanInner || cleanInner === "<br>" || cleanInner === "<br/>" || cleanInner === "<br />" || cleanInner === "&nbsp;") {
         if (marginMarker) {
-          blocks.push({ kind: "paragraph", text: "", segs: plainSegments(""), marginMarker });
+          blocks.push({ id: blockId, kind: "paragraph", text: "", segs: plainSegments(""), marginMarker });
         } else {
-          blocks.push({ kind: "blank", text: "" });
+          blocks.push({ id: blockId, kind: "blank", text: "" });
         }
         continue;
       }
@@ -836,6 +1002,7 @@ export function parseHtmlContent(
             ? "answer"
             : "subquestion";
           blocks.push({
+            id: blockId,
             kind: "paragraph",
             text: "",
             segs: plainSegments(""),
@@ -857,6 +1024,7 @@ export function parseHtmlContent(
           const bodyText = prefixMatch[2]!;
           const strippedSegs = stripPrefixFromSegs(segs, prefixMatch[0].length - bodyText.length);
           blocks.push({
+            id: blockId,
             kind: "paragraph",
             text: segText(strippedSegs),
             segs: strippedSegs,
@@ -868,12 +1036,12 @@ export function parseHtmlContent(
 
       if (!text) {
         if (marginMarker) {
-          blocks.push({ kind: "paragraph", text: "", segs: plainSegments(""), marginMarker });
+          blocks.push({ id: blockId, kind: "paragraph", text: "", segs: plainSegments(""), marginMarker });
         } else {
-          blocks.push({ kind: "blank", text: "" });
+          blocks.push({ id: blockId, kind: "blank", text: "" });
         }
       } else {
-        blocks.push({ kind: "paragraph", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
+        blocks.push({ id: blockId, kind: "paragraph", text: segText(segs), segs, ...(marginMarker ? { marginMarker } : {}) });
       }
       continue;
     }
@@ -1050,9 +1218,12 @@ function parseLegacyMarkdown(raw: string): Block[] {
 
 /**
  * Turns content into structured blocks for the handwriting layout engine.
- * Supports rich HTML from the editor as well as backward-compatible legacy markdown.
+ * Accepts structured DocumentBlock[], layout Block[], rich HTML, or legacy markdown.
  */
-export function parseContent(raw: string): Block[] {
+export function parseContent(raw: string | Block[] | DocumentBlock[]): Block[] {
+  if (Array.isArray(raw)) {
+    return toHandwritingBlocks(raw);
+  }
   if (isHtmlContent(raw)) {
     return parseHtmlContent(raw);
   }
@@ -1148,15 +1319,7 @@ export function blocksToHtml(blocks: Block[]): string {
       }
       case "table": {
         if (b.table) {
-          const t = b.table;
-          const rowsHtml = t.rows
-            .map((row, rIdx) => {
-              const tag = rIdx === 0 && t.headerRow ? "th" : "td";
-              const cells = row.map((cell) => `<${tag}>${cell}</${tag}>`).join("");
-              return `<tr>${cells}</tr>`;
-            })
-            .join("");
-          parts.push(`<table><tbody>${rowsHtml}</tbody></table>`);
+          parts.push(tableDataToHtml(b.table));
         }
         break;
       }
@@ -1165,8 +1328,14 @@ export function blocksToHtml(blocks: Block[]): string {
         const escLatex = latex.replace(/"/g, "&quot;");
         const preview = latex.length > 60 ? latex.slice(0, 57) + "…" : latex;
         const escPreview = preview.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const idAttr = b.id ? ` data-block-id="${b.id}"` : "";
+        const colorAttr = b.math?.color ? ` data-color="${b.math.color}"` : "";
+        const mAttrs = b.marginMarker
+          ? ` data-margin-marker="${b.marginMarker.text}" data-margin-type="${b.marginMarker.type}"` +
+            (b.marginMarker.color ? ` data-margin-color="${b.marginMarker.color}"` : "")
+          : "";
         parts.push(
-          `<div class="math-block" data-latex="${escLatex}" contenteditable="false" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;margin:4px 0;border-radius:6px;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.25);cursor:pointer;user-select:none;font-family:monospace;font-size:0.82em;color:#4338ca;white-space:nowrap;"><span style="opacity:0.7;font-size:1.1em;">∑</span><span>${escPreview}</span></div>`,
+          `<div class="math-block"${idAttr}${colorAttr}${mAttrs} data-latex="${escLatex}" contenteditable="false" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;margin:4px 0;border-radius:6px;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.25);cursor:pointer;user-select:none;font-family:monospace;font-size:0.82em;color:#4338ca;white-space:nowrap;"><span style="opacity:0.7;font-size:1.1em;">∑</span><span>${escPreview}</span></div>`,
         );
         break;
       }
@@ -1176,19 +1345,25 @@ export function blocksToHtml(blocks: Block[]): string {
         const escDef = defJson.replace(/"/g, "&quot;");
         const title = def?.title || `${def?.type ?? "graph"} graph`;
         const escTitle = title.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const idAttr = b.id ? ` data-block-id="${b.id}"` : "";
+        const mAttrs = b.marginMarker
+          ? ` data-margin-marker="${b.marginMarker.text}" data-margin-type="${b.marginMarker.type}"` +
+            (b.marginMarker.color ? ` data-margin-color="${b.marginMarker.color}"` : "")
+          : "";
         parts.push(
-          `<div class="graph-block" data-graph-definition="${escDef}" contenteditable="false" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;margin:4px 0;border-radius:6px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);cursor:pointer;user-select:none;font-family:sans-serif;font-size:0.82em;color:#047857;white-space:nowrap;"><span style="opacity:0.7;font-size:1.1em;">📈</span><span>${escTitle}</span></div>`,
+          `<div class="graph-block"${idAttr}${mAttrs} data-graph-definition="${escDef}" contenteditable="false" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;margin:4px 0;border-radius:6px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);cursor:pointer;user-select:none;font-family:sans-serif;font-size:0.82em;color:#047857;white-space:nowrap;"><span style="opacity:0.7;font-size:1.1em;">📈</span><span>${escTitle}</span></div>`,
         );
         break;
       }
       case "paragraph":
       default: {
+        const idAttr = b.id ? ` data-block-id="${b.id}"` : "";
         const mAttrs = b.marginMarker
           ? ` data-margin-marker="${b.marginMarker.text}" data-margin-type="${b.marginMarker.type}"` +
             (b.marginMarker.color ? ` data-margin-color="${b.marginMarker.color}"` : "")
           : "";
         const innerText = segsToHtml(b.segs);
-        parts.push(`<p${mAttrs}>${innerText || "<br>"}</p>`);
+        parts.push(`<p${idAttr}${mAttrs}>${innerText || "<br>"}</p>`);
         break;
       }
     }
@@ -1237,25 +1412,44 @@ export function tableToMarkdown(table: TableData): string {
   return out.join("\n");
 }
 
-/** Converts HTML content to plain text with preserved line breaks for on-page text editing. */
+/**
+ * Safely converts Block[] or HTML content to plain text representation with preserved
+ * placeholders for Math, Table, and Graph blocks so they can be recognized during Write-on-Page.
+ */
+export function blocksToPlainText(blocks: Block[]): string {
+  const parts: string[] = [];
+  for (const b of blocks) {
+    switch (b.kind) {
+      case "math": {
+        const latex = b.math?.latex ?? b.text;
+        parts.push(`$$\n${latex}\n$$`);
+        break;
+      }
+      case "graph": {
+        const title = b.graph?.definition.title || b.id || "graph";
+        parts.push(`[Graph: ${title}]`);
+        break;
+      }
+      case "table": {
+        const id = b.id || "table";
+        parts.push(`[Table: ${id}]`);
+        break;
+      }
+      default: {
+        parts.push(b.text);
+        break;
+      }
+    }
+  }
+  return parts.join("\n").trimEnd();
+}
+
+/** Converts HTML content to plain text with preserved line breaks and block markers for on-page editing. */
 export function htmlToPlainText(html: string): string {
   if (!html) return "";
   if (!isHtmlContent(html)) return html;
-  const unnested = stripTextBlockWrappers(html);
-  const withMath = unnested.replace(
-    /<div[^>]*?(?:class=["'][^"']*math-block[^"']*["']|data-block-type=["']math["'])[^>]*data-latex=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>/gi,
-    (_, latex) => `\n$$\n${unescapeHtml(latex)}\n$$\n`,
-  );
-  const withGraph = withMath.replace(
-    /<div[^>]*?(?:class=["'][^"']*graph-block[^"']*["']|data-block-type=["']graph["'])[^>]*data-graph-definition=["']([^"']*)["'][^>]*>[\s\S]*?<\/div>/gi,
-    () => `\n[Graph]\n`,
-  );
-  const withLineBreaks = withGraph
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|h[1-6]|li|tr|blockquote|pre)>/gi, "\n")
-    .replace(/<hr\s*\/?>/gi, "\n---\n");
-  const stripped = withLineBreaks.replace(/<[^>]+>/g, "");
-  return unescapeHtml(stripped).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd();
+  const blocks = parseContent(html);
+  return blocksToPlainText(blocks);
 }
 
 /** Converts plain text input from on-page writing into clean paragraph HTML. */
@@ -1276,3 +1470,274 @@ export function plainTextToHtml(plain: string): string {
   }
   return paragraphs.join("");
 }
+
+/**
+ * Updates a structured document from plain-text input (such as Write-on-Page)
+ * without EVER destroying non-text blocks (MathBlock, TableBlock, GraphBlock)
+ * or stripping margin metadata.
+ */
+export function updateContentFromPlainText(originalContent: string, newPlainText: string): string {
+  if (!originalContent || !originalContent.trim()) {
+    return plainTextToHtml(newPlainText);
+  }
+
+  const originalBlocks = parseContent(originalContent);
+  if (originalBlocks.length === 0) {
+    return plainTextToHtml(newPlainText);
+  }
+
+  // Check if there are any structured non-text blocks
+  const nonTextIndices: number[] = [];
+  originalBlocks.forEach((b, idx) => {
+    if (b.kind === "math" || b.kind === "graph" || b.kind === "table") {
+      nonTextIndices.push(idx);
+    }
+  });
+
+  // Fast path: Pure text document
+  if (nonTextIndices.length === 0) {
+    const rawLines = newPlainText.split("\n");
+    const updated: Block[] = [];
+    rawLines.forEach((line, idx) => {
+      const orig = originalBlocks[idx];
+      updated.push({
+        kind: orig?.kind || "paragraph",
+        text: line,
+        segs: [{ text: line, bold: false, underline: false }],
+        ...(orig?.id ? { id: orig.id } : {}),
+        ...(orig?.marginMarker ? { marginMarker: orig.marginMarker } : {}),
+      });
+    });
+    return blocksToHtml(updated);
+  }
+
+  // Non-text blocks present: preserve all non-text blocks strictly
+  const pattern = /(\$\$[\s\S]*?\$\$|\[Graph(?::\s*[^\]]*)?\]|\[Table(?::\s*[^\]]*)?\])/gi;
+  const textSlices: string[] = [];
+
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(newPlainText)) !== null) {
+    textSlices.push(newPlainText.slice(lastIndex, match.index));
+    lastIndex = match.index + match[0].length;
+  }
+  textSlices.push(newPlainText.slice(lastIndex));
+
+  // Reassemble blocks preserving non-text blocks in their original structure
+  const resultBlocks: Block[] = [];
+
+  let origTextIndex = 0;
+  for (let i = 0; i <= nonTextIndices.length; i++) {
+    const textSlice = (i < textSlices.length ? textSlices[i] : "") || "";
+    const cleanLines = textSlice
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+
+    const nextNonTextIdx = i < nonTextIndices.length ? (nonTextIndices[i] ?? originalBlocks.length) : originalBlocks.length;
+    const origSlice = originalBlocks.slice(origTextIndex, nextNonTextIdx);
+
+    if (cleanLines.length === 0 && origSlice.length === 0) {
+      // no text in this slice
+    } else if (cleanLines.length === 0 && origSlice.length > 0) {
+      // Slice was emptied
+    } else {
+      cleanLines.forEach((line, lineIdx) => {
+        const origBlock = origSlice[lineIdx];
+        resultBlocks.push({
+          kind: origBlock?.kind || "paragraph",
+          text: line,
+          segs: [{ text: line, bold: false, underline: false }],
+          ...(origBlock?.id ? { id: origBlock.id } : {}),
+          ...(origBlock?.marginMarker ? { marginMarker: origBlock.marginMarker } : {}),
+        });
+      });
+    }
+
+    // Insert the non-text block if there is one at this position
+    if (i < nonTextIndices.length) {
+      const ntBlock = originalBlocks[nonTextIndices[i]!];
+      if (ntBlock) {
+        resultBlocks.push(ntBlock);
+      }
+      origTextIndex = (nonTextIndices[i] ?? 0) + 1;
+    }
+  }
+
+  return blocksToHtml(resultBlocks);
+}
+
+/**
+ * Converts canonical DocumentBlock[] into layout-ready handwriting Block[] instances.
+ * Operates directly on structured objects without serializing back to HTML string,
+ * completely avoiding lossy regex tokenization or round-trip string reparsing.
+ */
+export function documentBlocksToHandwritingBlocks(blocks: DocumentBlock[]): Block[] {
+  if (!blocks || blocks.length === 0) return [];
+  const result: Block[] = [];
+
+  for (const block of blocks) {
+    switch (block.type) {
+      case "text": {
+        const textBlocks = parseHtmlContent(block.html);
+        if (textBlocks.length === 0) {
+          result.push({
+            id: block.id,
+            kind: "paragraph",
+            text: "",
+            segs: [],
+            ...(block.marginMarker ? { marginMarker: block.marginMarker } : {}),
+          });
+        } else {
+          for (let i = 0; i < textBlocks.length; i++) {
+            const tb = textBlocks[i]!;
+            result.push({
+              ...tb,
+              id: i === 0 ? block.id : `${block.id}_${i}`,
+              ...(i === 0 && block.marginMarker ? { marginMarker: block.marginMarker } : {}),
+            });
+          }
+        }
+        break;
+      }
+      case "math": {
+        result.push({
+          id: block.id,
+          kind: "math",
+          text: block.naturalExpr || block.latex || "",
+          math: {
+            latex: block.latex || block.naturalExpr || "",
+            display: block.displayMode === "compact" ? "inline" : "block",
+            ...(block.color ? { color: block.color } : {}),
+          },
+          ...(block.marginMarker ? { marginMarker: block.marginMarker } : {}),
+        });
+        break;
+      }
+      case "table": {
+        const tableData = block.tableData ?? parseTableHtml(block.html);
+        result.push({
+          id: block.id,
+          kind: "table",
+          text: "",
+          ...(tableData ? { table: tableData } : {}),
+          ...(block.marginMarker ? { marginMarker: block.marginMarker } : {}),
+        });
+        break;
+      }
+      case "graph": {
+        result.push({
+          id: block.id,
+          kind: "graph",
+          text: JSON.stringify(block.graphDef),
+          graph: {
+            definition: block.graphDef,
+          },
+          ...(block.marginMarker ? { marginMarker: block.marginMarker } : {}),
+        });
+        break;
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Normalizes handwriting Block[] instances into canonical DocumentBlock[] instances.
+ * Preserves stable IDs, margin markers, math attributes, table structures, and graph definitions.
+ */
+export function handwritingBlocksToDocumentBlocks(blocks: Block[]): DocumentBlock[] {
+  if (!blocks || blocks.length === 0) {
+    return [{
+      id: "blk_empty",
+      type: "text",
+      html: "<p><br></p>",
+      createdAt: Date.now(),
+    }];
+  }
+
+  const result: DocumentBlock[] = [];
+  let pendingTextBlocks: Block[] = [];
+
+  const flushPendingText = () => {
+    if (pendingTextBlocks.length === 0) return;
+    const first = pendingTextBlocks[0]!;
+    const html = blocksToHtml(pendingTextBlocks);
+    result.push({
+      id: first.id || `txt_${Math.random().toString(36).slice(2, 10)}`,
+      type: "text",
+      html: html || "<p><br></p>",
+      ...(first.marginMarker ? { marginMarker: first.marginMarker } : {}),
+      createdAt: Date.now(),
+    });
+    pendingTextBlocks = [];
+  };
+
+  for (const b of blocks) {
+    if (b.kind === "math") {
+      flushPendingText();
+      const latex = b.math?.latex || b.text || "";
+      result.push({
+        id: b.id || `math_${Math.random().toString(36).slice(2, 10)}`,
+        type: "math",
+        naturalExpr: b.text || latex,
+        latex,
+        displayMode: b.math?.display === "inline" ? "compact" : "block",
+        ...(b.math?.color ? { color: b.math.color } : {}),
+        ...(b.marginMarker ? { marginMarker: b.marginMarker } : {}),
+        createdAt: Date.now(),
+      });
+    } else if (b.kind === "graph") {
+      flushPendingText();
+      result.push({
+        id: b.id || `grp_${Math.random().toString(36).slice(2, 10)}`,
+        type: "graph",
+        graphDef: b.graph?.definition ?? {
+          id: b.id || "grp",
+          type: "coordinate",
+          space: { xMin: -5, xMax: 5, yMin: -5, yMax: 5, showGrid: true, showAxisLabels: true, originVisible: true },
+        },
+        ...(b.marginMarker ? { marginMarker: b.marginMarker } : {}),
+        createdAt: Date.now(),
+      });
+    } else if (b.kind === "table") {
+      flushPendingText();
+      result.push({
+        id: b.id || `tbl_${Math.random().toString(36).slice(2, 10)}`,
+        type: "table",
+        tableData: b.table,
+        html: b.table ? tableDataToHtml(b.table) : "<table><tbody><tr><td></td></tr></tbody></table>",
+        ...(b.marginMarker ? { marginMarker: b.marginMarker } : {}),
+        createdAt: Date.now(),
+      });
+    } else {
+      pendingTextBlocks.push(b);
+    }
+  }
+
+  flushPendingText();
+  return result;
+}
+
+/**
+ * Resolves content into handwriting layout Block[] instances regardless of whether
+ * it was provided as an HTML/markdown string, an existing Block[] array, or a DocumentBlock[] array.
+ */
+export function toHandwritingBlocks(content: string | Block[] | DocumentBlock[]): Block[] {
+  if (typeof content === "string") {
+    return parseContent(content);
+  }
+  if (!Array.isArray(content) || content.length === 0) {
+    return [];
+  }
+  const first = content[0] as any;
+  if (first && typeof first === "object" && "kind" in first) {
+    return content as Block[];
+  }
+  if (first && typeof first === "object" && "type" in first) {
+    return documentBlocksToHandwritingBlocks(content as DocumentBlock[]);
+  }
+  return [];
+}
+

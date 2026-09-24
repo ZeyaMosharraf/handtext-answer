@@ -132,6 +132,7 @@ function runTests() {
       id: "blk-math-1",
       type: "math" as const,
       latex: "\\int_0^1 x^2 dx",
+      naturalExpr: "\\int_0^1 x^2 dx",
       displayMode: "block" as const,
       marginMarker: { type: "subquestion" as const, text: "a)" },
       createdAt: 1002,
@@ -139,7 +140,7 @@ function runTests() {
     {
       id: "blk-tbl-1",
       type: "table" as const,
-      tableHtml: "<table><tbody><tr><td>Item</td><td>Value</td></tr></tbody></table>",
+      html: "<table><tbody><tr><td>Item</td><td>Value</td></tr></tbody></table>",
       marginMarker: { type: "marks" as const, text: "[10M]" },
       createdAt: 1003,
     },

@@ -572,12 +572,31 @@ class Parser {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+const PARSE_MATH_CACHE_MAX = 500;
+const parseMathCache = new Map<string, MathNode[]>();
+
 /**
  * Parse a LaTeX math string into a MathNode[] AST.
  * Never throws — resilient to unknown commands and malformed input.
+ * Caches ASTs for repeated formulas to eliminate reparsing overhead.
  */
 export function parseMath(latex: string): MathNode[] {
-  const tokens = tokenize(latex.trim());
+  const trimmed = latex.trim();
+  const cached = parseMathCache.get(trimmed);
+  if (cached) return cached;
+
+  const tokens = tokenize(trimmed);
   const parser = new Parser(tokens);
-  return parser.parseExpression();
+  const ast = parser.parseExpression();
+
+  if (parseMathCache.size >= PARSE_MATH_CACHE_MAX) {
+    const firstKey = parseMathCache.keys().next().value;
+    if (firstKey !== undefined) parseMathCache.delete(firstKey);
+  }
+  parseMathCache.set(trimmed, ast);
+  return ast;
+}
+
+export function clearMathParserCache(): void {
+  parseMathCache.clear();
 }

@@ -103,18 +103,41 @@ function makeBox(
 
 // ─── Top-level layoutMath ─────────────────────────────────────────────────────
 
+const LAYOUT_MATH_CACHE_MAX = 500;
+const layoutMathCache = new Map<string, MathLayoutBox>();
+
 /**
  * Layout a sequence of MathNodes into a single MathLayoutBox
  * representing a horizontal run of math content.
+ * Memoizes layout boxes by AST/latex and font metrics for high performance.
  */
 export function layoutMath(
   ast: MathNode[],
   ctx: CanvasRenderingContext2D,
   settings: HandwritingSettings,
   scale = 1.0,
+  cacheKey?: string,
 ): MathLayoutBox {
+  const effectiveKey =
+    (cacheKey ?? JSON.stringify(ast)) +
+    `|${settings.fontSize}|${settings.fontFamily}|${scale}`;
+
+  const cached = layoutMathCache.get(effectiveKey);
+  if (cached) return cached;
+
   const baseSize = settings.fontSize;
-  return layoutSequence(ast, ctx, settings, baseSize, scale);
+  const box = layoutSequence(ast, ctx, settings, baseSize, scale);
+
+  if (layoutMathCache.size >= LAYOUT_MATH_CACHE_MAX) {
+    const firstKey = layoutMathCache.keys().next().value;
+    if (firstKey !== undefined) layoutMathCache.delete(firstKey);
+  }
+  layoutMathCache.set(effectiveKey, box);
+  return box;
+}
+
+export function clearMathLayoutCache(): void {
+  layoutMathCache.clear();
 }
 
 /**

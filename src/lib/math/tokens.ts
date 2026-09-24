@@ -63,6 +63,13 @@ function nextIsBinaryOp(latex: string, idx: number): boolean {
   return false;
 }
 
+export const MATH_NAMED_FUNCTIONS = new Set([
+  "min", "max", "sin", "cos", "tan", "sec", "csc", "cot",
+  "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh",
+  "log", "ln", "lg", "exp", "det", "lim", "gcd", "lcm",
+  "dim", "ker", "deg", "arg", "sgn", "sup", "inf",
+]);
+
 /**
  * Tokenize a LaTeX math string into Token[].
  * Resilient: unrecognized characters become OPERATOR tokens.
@@ -193,10 +200,20 @@ export function tokenize(latex: string): Token[] {
       continue;
     }
 
-    // Single letter identifier
+    // Multi-letter mathematical functions or single-letter identifiers
     if (/[a-zA-Z]/.test(ch)) {
-      tokens.push({ kind: "IDENT", value: ch, pos: i });
-      i++;
+      let j = i;
+      while (j < len && /[a-zA-Z]/.test(latex[j]!)) j++;
+      const word = latex.slice(i, j);
+      if (MATH_NAMED_FUNCTIONS.has(word)) {
+        tokens.push({ kind: "COMMAND", value: `\\${word}`, pos: i });
+        i = j;
+        continue;
+      }
+      for (let k = i; k < j; k++) {
+        tokens.push({ kind: "IDENT", value: latex[k]!, pos: k });
+      }
+      i = j;
       continue;
     }
 

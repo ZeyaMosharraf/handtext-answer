@@ -1,4 +1,5 @@
-import { HIGHLIGHT_COLOR, parseInline, type Seg } from "./parse";
+import { HIGHLIGHT_COLOR, parseInline, type Seg, type Block } from "./parse";
+import type { DocumentBlock } from "@/types/document";
 import {
   BAND_PAD_TOP,
   BAND_ROW_HEIGHT,
@@ -42,7 +43,7 @@ import { layoutGraph } from "../graph";
 
 export interface RenderInput {
   question?: string;
-  content: string;
+  content: string | Block[] | DocumentBlock[];
   settings: HandwritingSettings;
   debugLayout?: boolean;
 }
@@ -410,7 +411,7 @@ function drawMathBlock(
   ink: string,
 ): void {
   const ast = parseMath(placement.latex);
-  const box = layoutMath(ast, ctx, settings, 1.0);
+  const box = layoutMath(ast, ctx, settings, 1.0, placement.latex);
 
   // Baseline:
   // For 1-line formulas, lock directly to the ruled line baseline for 100% handwriting consistency.
@@ -451,7 +452,11 @@ function drawGraphBlock(
 ): void {
   const box = layoutGraph(placement.definition, coordinates.rulingSpacing);
   const ruledLineY = getBaseline(coordinates, placement.lineIndex);
-  const topY = ruledLineY - coordinates.rulingSpacing;
+  const minTop = Math.max(coordinates.contentTop, coordinates.headerHeight);
+  const topY =
+    placement.lineIndex === 0
+      ? minTop
+      : Math.max(minTop, ruledLineY - coordinates.rulingSpacing);
   const startX = coordinates.contentLeft;
   const graphRng = makeRng(hashString(placement.definition.id || "graph"));
   box.draw(ctx, startX, topY, settings, graphRng, ink);
@@ -467,7 +472,11 @@ function drawTableRow(
 ): LayoutTableBounds {
   // A notebook table uses the paper's existing horizontal rules: every row
   // begins one rule above its first text baseline and ends on its last one.
-  const top = getBaseline(coordinates, placement.lineIndex - 1);
+  const minTop = Math.max(coordinates.contentTop, coordinates.headerHeight);
+  const top =
+    placement.lineIndex === 0
+      ? minTop
+      : Math.max(minTop, getBaseline(coordinates, placement.lineIndex - 1));
   const bottom = getBaseline(coordinates, placement.lineIndex + placement.lineUnits - 1);
   const left = coordinates.contentLeft;
   const width = placement.columnWidths.reduce((sum, columnWidth) => sum + columnWidth, 0);

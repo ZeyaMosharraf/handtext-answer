@@ -27,6 +27,7 @@ import {
   generateBlockId,
 } from "../../types/document";
 import type { GraphDefinition } from "../graph/types";
+import { matchAttr } from "../handwriting/parse";
 
 // ─── Attribute & HTML Escaping Helpers ───────────────────────────────────────
 
@@ -140,8 +141,9 @@ export function blocksToHtml(blocks: DocumentBlock[]): string {
       }
 
       case "graph": {
-        const defJson = JSON.stringify(block.graphDef);
-        const titleOrType = block.graphDef.title || block.graphDef.type || "Graph";
+        const graphObj = block.graphDef || (block as any).graph?.definition;
+        const defJson = JSON.stringify(graphObj || block.graphDef);
+        const titleOrType = graphObj?.title || graphObj?.type || "Graph";
 
         parts.push(
           `<div data-block-id="${escapeAttr(block.id)}" data-block-type="graph" data-graph-definition="${escapeAttr(defJson)}"${markerAttrs} class="graph-block" contenteditable="false"><span class="graph-placeholder" style="width: 100%; height: 180px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; font-family: monospace; color: #666;">[Graph: ${escapeHtml(titleOrType)}]</span></div>`
@@ -291,7 +293,7 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
 
   // 2. Fast Regex Path for non-DOM environments
   const modernBlockRegex =
-    /<div[^>]*data-block-id=["']([^"']*)["'][^>]*data-block-type=["'](text|math|table|graph)["'][^>]*>([\s\S]*?)<\/div>|<div[^>]*data-block-type=["'](text|math|table|graph)["'][^>]*data-block-id=["']([^"']*)["'][^>]*>([\s\S]*?)<\/div>/gi;
+    /<div\b((?:[^"'>]|(["'])[\s\S]*?\2)*)>([\s\S]*?)<\/div>/gi;
 
   const modernBlocks: DocumentBlock[] = [];
   let lastIndex = 0;
@@ -305,27 +307,31 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
       break;
     }
 
+    const fullMatchedDiv = match[0];
+    const attrs = match[1] || "";
+    const innerHtml = match[3] || "";
+
+    const rawBlockId = matchAttr(attrs, "data-block-id");
+    const rawBlockType = matchAttr(attrs, "data-block-type");
+
+    if (!rawBlockId && !rawBlockType) {
+      hasNonModernContent = true;
+      break;
+    }
+
     lastIndex = modernBlockRegex.lastIndex;
 
-    const blockId = match[1] || match[5] || generateBlockId("blk");
-    const blockType = (match[2] || match[4]) as DocumentBlock["type"];
-    const fullMatchedDiv = match[0];
-    const innerHtml = match[3] || match[6] || "";
+    const blockId = rawBlockId || generateBlockId("blk");
+    const blockType = (rawBlockType || "text") as DocumentBlock["type"];
 
-    const markerTextMatch =
-      fullMatchedDiv.match(/data-margin-marker=["']([^"']*)["']/i) ||
-      innerHtml.match(/data-margin-marker=["']([^"']*)["']/i);
-    const markerTypeMatch =
-      fullMatchedDiv.match(/data-margin-type=["']([^"']*)["']/i) ||
-      innerHtml.match(/data-margin-type=["']([^"']*)["']/i);
-    const markerColorMatch =
-      fullMatchedDiv.match(/data-margin-color=["']([^"']*)["']/i) ||
-      innerHtml.match(/data-margin-color=["']([^"']*)["']/i);
-    const marginMarker = markerTextMatch
+    const markerText = matchAttr(attrs, "data-margin-marker") || matchAttr(innerHtml, "data-margin-marker");
+    const markerType = matchAttr(attrs, "data-margin-type") || matchAttr(innerHtml, "data-margin-type");
+    const markerColor = matchAttr(attrs, "data-margin-color") || matchAttr(innerHtml, "data-margin-color");
+    const marginMarker = markerText
       ? parseMarginMarkerFromAttributes(
-          unescapeAttr(markerTextMatch[1] ?? ""),
-          markerTypeMatch ? unescapeAttr(markerTypeMatch[1] ?? "") : undefined,
-          markerColorMatch ? unescapeAttr(markerColorMatch[1] ?? "") : undefined
+          unescapeAttr(markerText),
+          markerType ? unescapeAttr(markerType) : undefined,
+          markerColor ? unescapeAttr(markerColor) : undefined
         )
       : undefined;
 
@@ -338,26 +344,22 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
         createdAt: Date.now(),
       });
     } else if (blockType === "math") {
-      const latexMatch = fullMatchedDiv.match(/data-latex=["']([^"']*)["']/i);
-      const naturalMatch = fullMatchedDiv.match(/data-natural-expr=["']([^"']*)["']/i);
-      const displayMatch = fullMatchedDiv.match(/data-display-mode=["']([^"']*)["']/i);
-      const colorMatch = fullMatchedDiv.match(/data-color=["']([^"']*)["']/i);
+      const rawLatex = matchAttr(attrs, "data-latex");
+      const rawNatural = matchAttr(attrs, "data-natural-expr");
+      const rawDisplay = matchAttr(attrs, "data-display-mode");
+      const rawColor = matchAttr(attrs, "data-color");
 
-      const latex = latexMatch ? unescapeAttr(latexMatch[1] ?? "") : innerHtml.trim();
-      const naturalExpr = naturalMatch
-        ? unescapeAttr(naturalMatch[1] ?? "")
-        : latex;
-      const displayMode = (displayMatch ? displayMatch[1] : "block") as
-        | "block"
-        | "compact";
-      const color = colorMatch ? unescapeAttr(colorMatch[1] ?? "") : undefined;
+      const latex = rawLatex !== null ? unescapeAttr(rawLatex) : innerHtml.trim();
+      const naturalExpr = rawNatural !== null ? unescapeAttr(rawNatural) : latex;
+      const displayMode = (rawDisplay === "compact" ? "compact" : "block") as "block" | "compact";
+      const color = rawColor ? unescapeAttr(rawColor) : undefined;
 
       modernBlocks.push({
         id: blockId,
         type: "math",
         naturalExpr,
         latex,
-        displayMode: displayMode === "compact" ? "compact" : "block",
+        displayMode,
         ...(color ? { color } : {}),
         ...(marginMarker ? { marginMarker } : {}),
         createdAt: Date.now(),
@@ -374,12 +376,12 @@ export function htmlToBlocks(rawHtml: string): DocumentBlock[] {
         createdAt: Date.now(),
       });
     } else if (blockType === "graph") {
-      const defMatch = fullMatchedDiv.match(/data-graph-definition=["']([^"']*)["']/i);
+      const rawDef = matchAttr(attrs, "data-graph-definition");
       let graphDef: GraphDefinition;
 
-      if (defMatch) {
+      if (rawDef) {
         try {
-          graphDef = JSON.parse(unescapeAttr(defMatch[1] ?? ""));
+          graphDef = JSON.parse(unescapeAttr(rawDef));
         } catch {
           graphDef = createDefaultGraphDef(blockId);
         }
@@ -435,34 +437,40 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
   let mathCounter = 0;
 
   let tokenized = html.replace(
-    /<div[^>]*class=["'][^"']*math-block[^"']*["'][^>]*>([\s\S]*?)<\/div>|<div[^>]*data-latex=["'][^"']*["'][^>]*>([\s\S]*?)<\/div>/gi,
-    (fullMatch) => {
-      const idMatch = fullMatch.match(/data-block-id=["']([^"']*)["']/i);
-      const latexMatch = fullMatch.match(/data-latex=["']([^"']*)["']/i);
-      const naturalMatch = fullMatch.match(/data-natural-expr=["']([^"']*)["']/i);
-      const displayMatch = fullMatch.match(/data-display-mode=["']([^"']*)["']/i);
-      const colorMatch = fullMatch.match(/data-color=["']([^"']*)["']/i);
-      const markerMatch = fullMatch.match(/data-margin-marker=["']([^"']*)["']/i);
-      const markerTypeMatch = fullMatch.match(/data-margin-type=["']([^"']*)["']/i);
-      const markerColorMatch = fullMatch.match(/data-margin-color=["']([^"']*)["']/i);
+    /<div\b((?:[^"'>]|(["'])[\s\S]*?\2)*)>([\s\S]*?)<\/div>/gi,
+    (fullMatch, attrs, _q, inner) => {
+      const isMath =
+        /class=(["'])[\s\S]*?math-block[\s\S]*?\1/i.test(attrs) ||
+        /data-block-type=(["'])math\1/i.test(attrs) ||
+        matchAttr(attrs, "data-latex") !== null;
+      if (!isMath) return fullMatch;
+
+      const rawId = matchAttr(attrs, "data-block-id");
+      const rawLatex = matchAttr(attrs, "data-latex");
+      const rawNatural = matchAttr(attrs, "data-natural-expr");
+      const rawDisplay = matchAttr(attrs, "data-display-mode");
+      const rawColor = matchAttr(attrs, "data-color");
+      const markerText = matchAttr(attrs, "data-margin-marker");
+      const markerType = matchAttr(attrs, "data-margin-type");
+      const markerColor = matchAttr(attrs, "data-margin-color");
 
       // Extract inner text fallback if data-latex is missing
       const innerText = fullMatch.replace(/<[^>]+>/g, "").trim();
-      const latex = latexMatch ? unescapeAttr(latexMatch[1] ?? "") : innerText;
-      const naturalExpr = naturalMatch ? unescapeAttr(naturalMatch[1] ?? "") : latex;
-      const displayMode = (displayMatch ? displayMatch[1] : "block") as "block" | "compact";
-      const color = colorMatch ? unescapeAttr(colorMatch[1] ?? "") : undefined;
-      const marginMarker = markerMatch
+      const latex = rawLatex !== null ? unescapeAttr(rawLatex) : innerText;
+      const naturalExpr = rawNatural !== null ? unescapeAttr(rawNatural) : latex;
+      const displayMode = (rawDisplay === "compact" ? "compact" : "block") as "block" | "compact";
+      const color = rawColor ? unescapeAttr(rawColor) : undefined;
+      const marginMarker = markerText
         ? parseMarginMarkerFromAttributes(
-            unescapeAttr(markerMatch[1] ?? ""),
-            markerTypeMatch ? unescapeAttr(markerTypeMatch[1] ?? "") : undefined,
-            markerColorMatch ? unescapeAttr(markerColorMatch[1] ?? "") : undefined
+            unescapeAttr(markerText),
+            markerType ? unescapeAttr(markerType) : undefined,
+            markerColor ? unescapeAttr(markerColor) : undefined
           )
         : undefined;
 
       const token = `__HANDTEXT_MATH_BLOCK_TOKEN_${mathCounter++}__`;
       mathTokenMap.set(token, {
-        id: idMatch ? idMatch[1] : undefined,
+        id: rawId || undefined,
         latex,
         naturalExpr,
         displayMode,
@@ -482,19 +490,25 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
   let graphCounter = 0;
 
   tokenized = tokenized.replace(
-    /<div[^>]*class=["'][^"']*graph-block[^"']*["'][^>]*>([\s\S]*?)<\/div>|<div[^>]*data-graph-definition=["'][^"']*["'][^>]*>([\s\S]*?)<\/div>/gi,
-    (fullMatch) => {
-      const idMatch = fullMatch.match(/data-block-id=["']([^"']*)["']/i);
-      const defMatch = fullMatch.match(/data-graph-definition=["']([^"']*)["']/i);
-      const markerMatch = fullMatch.match(/data-margin-marker=["']([^"']*)["']/i);
-      const markerTypeMatch = fullMatch.match(/data-margin-type=["']([^"']*)["']/i);
-      const markerColorMatch = fullMatch.match(/data-margin-color=["']([^"']*)["']/i);
+    /<div\b((?:[^"'>]|(["'])[\s\S]*?\2)*)>([\s\S]*?)<\/div>/gi,
+    (fullMatch, attrs) => {
+      const isGraph =
+        /class=(["'])[\s\S]*?graph-block[\s\S]*?\1/i.test(attrs) ||
+        /data-block-type=(["'])graph\1/i.test(attrs) ||
+        matchAttr(attrs, "data-graph-definition") !== null;
+      if (!isGraph) return fullMatch;
+
+      const rawId = matchAttr(attrs, "data-block-id");
+      const rawDef = matchAttr(attrs, "data-graph-definition");
+      const markerText = matchAttr(attrs, "data-margin-marker");
+      const markerType = matchAttr(attrs, "data-margin-type");
+      const markerColor = matchAttr(attrs, "data-margin-color");
 
       let graphDef: GraphDefinition;
-      const idSeed = (idMatch && idMatch[1]) ? idMatch[1] : "grp";
-      if (defMatch) {
+      const idSeed = rawId || "grp";
+      if (rawDef) {
         try {
-          graphDef = JSON.parse(unescapeAttr(defMatch[1] ?? ""));
+          graphDef = JSON.parse(unescapeAttr(rawDef));
         } catch {
           graphDef = createDefaultGraphDef(idSeed);
         }
@@ -502,17 +516,17 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
         graphDef = createDefaultGraphDef(idSeed);
       }
 
-      const marginMarker = markerMatch
+      const marginMarker = markerText
         ? parseMarginMarkerFromAttributes(
-            unescapeAttr(markerMatch[1] ?? ""),
-            markerTypeMatch ? unescapeAttr(markerTypeMatch[1] ?? "") : undefined,
-            markerColorMatch ? unescapeAttr(markerColorMatch[1] ?? "") : undefined
+            unescapeAttr(markerText),
+            markerType ? unescapeAttr(markerType) : undefined,
+            markerColor ? unescapeAttr(markerColor) : undefined
           )
         : undefined;
 
       const token = `__HANDTEXT_GRAPH_BLOCK_TOKEN_${graphCounter++}__`;
       graphTokenMap.set(token, {
-        id: idMatch ? idMatch[1] : undefined,
+        id: rawId || undefined,
         graphDef,
         marginMarker,
       });
@@ -529,22 +543,22 @@ function parseMixedOrLegacyHtml(html: string): DocumentBlock[] {
   let tableCounter = 0;
 
   tokenized = tokenized.replace(/<table[\s\S]*?<\/table>/gi, (tableHtml) => {
-    const idMatch = tableHtml.match(/data-block-id=["']([^"']*)["']/i);
-    const markerMatch = tableHtml.match(/data-margin-marker=["']([^"']*)["']/i);
-    const markerTypeMatch = tableHtml.match(/data-margin-type=["']([^"']*)["']/i);
-    const markerColorMatch = tableHtml.match(/data-margin-color=["']([^"']*)["']/i);
+    const rawId = matchAttr(tableHtml, "data-block-id");
+    const markerText = matchAttr(tableHtml, "data-margin-marker");
+    const markerType = matchAttr(tableHtml, "data-margin-type");
+    const markerColor = matchAttr(tableHtml, "data-margin-color");
 
-    const marginMarker = markerMatch
+    const marginMarker = markerText
       ? parseMarginMarkerFromAttributes(
-          unescapeAttr(markerMatch[1] ?? ""),
-          markerTypeMatch ? unescapeAttr(markerTypeMatch[1] ?? "") : undefined,
-          markerColorMatch ? unescapeAttr(markerColorMatch[1] ?? "") : undefined
+          unescapeAttr(markerText),
+          markerType ? unescapeAttr(markerType) : undefined,
+          markerColor ? unescapeAttr(markerColor) : undefined
         )
       : undefined;
 
     const token = `__HANDTEXT_TABLE_BLOCK_TOKEN_${tableCounter++}__`;
     tableTokenMap.set(token, {
-      id: idMatch ? idMatch[1] : undefined,
+      id: rawId || undefined,
       tableHtml,
       marginMarker,
     });
@@ -666,3 +680,13 @@ function createDefaultGraphDef(idSeed: string): GraphDefinition {
     },
   };
 }
+
+export {
+  documentBlocksToHandwritingBlocks,
+  handwritingBlocksToDocumentBlocks,
+  toHandwritingBlocks,
+  parseTableHtml,
+  tableDataToHtml,
+  blocksToPlainText,
+  updateContentFromPlainText,
+} from "../handwriting/parse";

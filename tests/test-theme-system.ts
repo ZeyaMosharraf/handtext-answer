@@ -142,10 +142,10 @@ class ThemeManager {
     const resolved = this.resolvedTheme;
     if (resolved === "dark") {
       this.root.classList.add("dark");
-      this.root.style.colorScheme = "dark";
+      this.root.style["colorScheme"] = "dark";
     } else {
       this.root.classList.remove("dark");
-      this.root.style.colorScheme = "light";
+      this.root.style["colorScheme"] = "light";
     }
   }
 }
@@ -156,7 +156,7 @@ console.log("\n=== 1. Light Mode Application & DOM State ===");
   assert(tm.theme === "light", "Theme state is light");
   assert(tm.resolvedTheme === "light", "Resolved theme is light");
   assert(!tm.root.classList.contains("dark"), "HTML root does not have .dark class");
-  assert(tm.root.style.colorScheme === "light", "Root colorScheme style is light");
+  assert(tm.root.style["colorScheme"] === "light", "Root colorScheme style is light");
 }
 
 console.log("\n=== 2. Dark Mode Application & DOM State ===");
@@ -165,7 +165,7 @@ console.log("\n=== 2. Dark Mode Application & DOM State ===");
   assert(tm.theme === "dark", "Theme state is dark");
   assert(tm.resolvedTheme === "dark", "Resolved theme is dark");
   assert(tm.root.classList.contains("dark"), "HTML root has .dark class");
-  assert(tm.root.style.colorScheme === "dark", "Root colorScheme style is dark");
+  assert(tm.root.style["colorScheme"] === "dark", "Root colorScheme style is dark");
 }
 
 console.log("\n=== 3. System Mode Following OS (Dark & Light) ===");
@@ -175,14 +175,14 @@ console.log("\n=== 3. System Mode Following OS (Dark & Light) ===");
   assert(tmDarkOS.theme === "system", "Theme is system");
   assert(tmDarkOS.resolvedTheme === "dark", "Resolved theme matches dark OS");
   assert(tmDarkOS.root.classList.contains("dark"), "Root has .dark class when OS is dark");
-  assert(tmDarkOS.root.style.colorScheme === "dark", "colorScheme is dark");
+  assert(tmDarkOS.root.style["colorScheme"] === "dark", "colorScheme is dark");
 
   // OS is light
   const tmLightOS = new ThemeManager("handtext-theme", "system", false);
   assert(tmLightOS.theme === "system", "Theme is system");
   assert(tmLightOS.resolvedTheme === "light", "Resolved theme matches light OS");
   assert(!tmLightOS.root.classList.contains("dark"), "Root lacks .dark class when OS is light");
-  assert(tmLightOS.root.style.colorScheme === "light", "colorScheme is light");
+  assert(tmLightOS.root.style["colorScheme"] === "light", "colorScheme is light");
 }
 
 console.log("\n=== 4. Dynamic OS Theme Changes in System Mode ===");

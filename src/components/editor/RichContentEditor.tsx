@@ -229,6 +229,199 @@ interface GutterMarkerItem {
   color?: string | undefined;
 }
 
+/**
+ * Inserts a top-level structured block (Math, Graph) at the caret position without
+ * ever nesting <div> elements inside <p> tags. If the caret is inside a non-empty
+ * paragraph or text block, splits it into pBefore, blockNode, and pAfter.
+ */
+function insertStructuredBlockAtCaret(
+  editor: HTMLElement,
+  blockNode: HTMLElement,
+  savedRange: Range | null,
+): HTMLElement {
+  const sel = typeof window !== "undefined" ? window.getSelection() : null;
+  const activeRange =
+    (sel && sel.rangeCount > 0 && editor.contains(sel.getRangeAt(0).commonAncestorContainer)
+      ? sel.getRangeAt(0)
+      : null) ??
+    (savedRange && editor.contains(savedRange.commonAncestorContainer)
+      ? savedRange
+      : null);
+
+  const createTrailingParagraph = () => {
+    const p = document.createElement("p");
+    p.innerHTML = "<br>";
+    return p;
+  };
+
+  const setCaretInElement = (target: HTMLElement, atStart = true) => {
+    if (typeof window === "undefined") return;
+    const s = window.getSelection();
+    if (!s) return;
+    try {
+      const r = document.createRange();
+      if (atStart) {
+        r.setStart(target, 0);
+      } else {
+        r.selectNodeContents(target);
+      }
+      r.collapse(true);
+      s.removeAllRanges();
+      s.addRange(r);
+    } catch {
+      // Ignore selection errors in non-browser environments
+    }
+  };
+
+  // 1. Check if caret is inside or on an existing math-block, graph-block, or table
+  let enclosingSpecial: HTMLElement | null = null;
+  if (activeRange) {
+    let curr: Node | null = activeRange.commonAncestorContainer;
+    while (curr && curr !== editor) {
+      if (
+        curr.nodeType === 1 &&
+        ((curr as HTMLElement).classList.contains("math-block") ||
+          (curr as HTMLElement).classList.contains("graph-block") ||
+          (curr as HTMLElement).tagName === "TABLE")
+      ) {
+        enclosingSpecial = curr as HTMLElement;
+        break;
+      }
+      curr = curr.parentNode;
+    }
+  }
+
+  if (enclosingSpecial && enclosingSpecial.parentNode) {
+    const trailingP = createTrailingParagraph();
+    if (enclosingSpecial.nextSibling) {
+      enclosingSpecial.parentNode.insertBefore(blockNode, enclosingSpecial.nextSibling);
+      enclosingSpecial.parentNode.insertBefore(trailingP, blockNode.nextSibling);
+    } else {
+      enclosingSpecial.parentNode.appendChild(blockNode);
+      enclosingSpecial.parentNode.appendChild(trailingP);
+    }
+    setCaretInElement(trailingP, true);
+    return blockNode;
+  }
+
+  // 2. Find direct child block of editor containing the selection
+  let topLevelBlock: HTMLElement | null = null;
+  if (activeRange) {
+    let curr: Node | null = activeRange.startContainer;
+    while (curr && curr.parentNode !== editor) {
+      curr = curr.parentNode;
+    }
+    if (curr && curr.nodeType === 1) {
+      topLevelBlock = curr as HTMLElement;
+    }
+  }
+
+  // If no top-level block found or activeRange is null, append to editor
+  if (!topLevelBlock || !activeRange || topLevelBlock.parentNode !== editor) {
+    const trailingP = createTrailingParagraph();
+    editor.appendChild(blockNode);
+    editor.appendChild(trailingP);
+    setCaretInElement(trailingP, true);
+    return blockNode;
+  }
+
+  // If the top-level block is empty (e.g. <p><br></p> or whitespace)
+  const isBlockEmpty =
+    !topLevelBlock.textContent?.trim() && !topLevelBlock.querySelector("img, svg, canvas, table, math");
+  if (isBlockEmpty) {
+    const trailingP = createTrailingParagraph();
+    topLevelBlock.replaceWith(blockNode);
+    if (blockNode.nextSibling) {
+      editor.insertBefore(trailingP, blockNode.nextSibling);
+    } else {
+      editor.appendChild(trailingP);
+    }
+    setCaretInElement(trailingP, true);
+    return blockNode;
+  }
+
+  // 3. If top-level block has content, split it at activeRange!
+  try {
+    const beforeRange = document.createRange();
+    beforeRange.setStart(topLevelBlock, 0);
+    beforeRange.setEnd(activeRange.startContainer, activeRange.startOffset);
+    const beforeContent = beforeRange.cloneContents();
+
+    const afterRange = document.createRange();
+    afterRange.setStart(activeRange.endContainer, activeRange.endOffset);
+    afterRange.setEnd(topLevelBlock, topLevelBlock.childNodes.length);
+    const afterContent = afterRange.cloneContents();
+
+    const hasBefore = Boolean(
+      beforeContent.textContent?.trim() ||
+        beforeContent.querySelector("img, svg, canvas, table, math"),
+    );
+    const hasAfter = Boolean(
+      afterContent.textContent?.trim() ||
+        afterContent.querySelector("img, svg, canvas, table, math"),
+    );
+
+    if (!hasBefore) {
+      // Caret was at start of paragraph: insert blockNode BEFORE topLevelBlock
+      editor.insertBefore(blockNode, topLevelBlock);
+      setCaretInElement(topLevelBlock, true);
+      return blockNode;
+    }
+
+    if (!hasAfter) {
+      // Caret was at end of paragraph: insert blockNode AFTER topLevelBlock, then trailing P
+      const trailingP = createTrailingParagraph();
+      if (topLevelBlock.nextSibling) {
+        editor.insertBefore(blockNode, topLevelBlock.nextSibling);
+        editor.insertBefore(trailingP, blockNode.nextSibling);
+      } else {
+        editor.appendChild(blockNode);
+        editor.appendChild(trailingP);
+      }
+      setCaretInElement(trailingP, true);
+      return blockNode;
+    }
+
+    // Caret was in middle of text: split into pBefore, blockNode, pAfter
+    const tag = topLevelBlock.tagName.toLowerCase();
+    const pBefore = document.createElement(tag);
+    for (let i = 0; i < topLevelBlock.attributes.length; i++) {
+      const attr = topLevelBlock.attributes[i];
+      if (attr) pBefore.setAttribute(attr.name, attr.value);
+    }
+    pBefore.appendChild(beforeContent);
+
+    const pAfter = document.createElement(tag);
+    pAfter.appendChild(afterContent);
+
+    topLevelBlock.replaceWith(pBefore);
+    if (pBefore.nextSibling) {
+      editor.insertBefore(blockNode, pBefore.nextSibling);
+    } else {
+      editor.appendChild(blockNode);
+    }
+    if (blockNode.nextSibling) {
+      editor.insertBefore(pAfter, blockNode.nextSibling);
+    } else {
+      editor.appendChild(pAfter);
+    }
+    setCaretInElement(pAfter, true);
+    return blockNode;
+  } catch {
+    // Safe fallback if range clone fails
+    const trailingP = createTrailingParagraph();
+    if (topLevelBlock.nextSibling) {
+      editor.insertBefore(blockNode, topLevelBlock.nextSibling);
+      editor.insertBefore(trailingP, blockNode.nextSibling);
+    } else {
+      editor.appendChild(blockNode);
+      editor.appendChild(trailingP);
+    }
+    setCaretInElement(trailingP, true);
+    return blockNode;
+  }
+}
+
 export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContentEditorProps>(
   ({ value, onChange, placeholder, className, onFormatChange, onMathBlockClick, onGraphBlockClick, answerMargin }, ref) => {
     const editorRef = useRef<HTMLDivElement>(null);
@@ -237,6 +430,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
     const gutterInnerRef = useRef<HTMLDivElement>(null);
     const lastValueRef = useRef<string>("");
     const isInternalChangeRef = useRef(false);
+    const isFocusedRef = useRef(false);
     const savedRangeRef = useRef<Range | null>(null);
 
     const [formatState, setFormatState] = useState<FormatState>({
@@ -689,6 +883,16 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         return;
       }
 
+      // If the user is actively focused in the editor and the value has not diverged externally,
+      // never replace el.innerHTML (prevents cursor jumping / losing caret while typing)
+      const isFocused =
+        isFocusedRef.current ||
+        (typeof document !== "undefined" && el.contains(document.activeElement));
+      if (isFocused && (value === lastValueRef.current || el.innerHTML === normalized)) {
+        lastValueRef.current = normalized;
+        return;
+      }
+
       if (el.innerHTML !== normalized) {
         el.innerHTML = normalized;
         hydrateBlockPresentations(el);
@@ -1048,8 +1252,6 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
           }
         };
 
-        let inserted = false;
-
         // 1. If a math block was explicitly selected by the user, paste directly after it
         if (selectedMathElementRef.current && el.contains(selectedMathElementRef.current)) {
           const target = selectedMathElementRef.current;
@@ -1063,107 +1265,10 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
           }
           setCaretInParagraph(trailingP);
           selectMathElement(mathDiv);
-          inserted = true;
-        }
-
-        // 2. Otherwise inspect caret position from current or saved selection
-        if (!inserted) {
-          const sel = window.getSelection();
-          const activeRange =
-            (sel && sel.rangeCount > 0 && el.contains(sel.getRangeAt(0).commonAncestorContainer)
-              ? sel.getRangeAt(0)
-              : null) ??
-            (savedRangeRef.current && el.contains(savedRangeRef.current.commonAncestorContainer)
-              ? savedRangeRef.current
-              : null);
-
-          if (activeRange) {
-            try {
-              let targetNode: Node | null = activeRange.startContainer;
-              if (targetNode.nodeType === 3) targetNode = targetNode.parentNode;
-              const parentBlock = (targetNode as HTMLElement)?.closest?.("p, div, .math-block");
-
-              if (parentBlock && parentBlock.classList.contains("math-block")) {
-                const trailingP = createTrailingParagraph();
-                if (parentBlock.nextSibling) {
-                  parentBlock.parentNode?.insertBefore(mathDiv, parentBlock.nextSibling);
-                  parentBlock.parentNode?.insertBefore(trailingP, mathDiv.nextSibling);
-                } else {
-                  parentBlock.parentNode?.appendChild(mathDiv);
-                  parentBlock.parentNode?.appendChild(trailingP);
-                }
-                setCaretInParagraph(trailingP);
-                selectMathElement(mathDiv);
-                inserted = true;
-              } else if (
-                parentBlock &&
-                parentBlock !== el &&
-                (!parentBlock.textContent?.trim() || parentBlock.innerHTML === "<br>")
-              ) {
-                const trailingP = createTrailingParagraph();
-                parentBlock.replaceWith(mathDiv);
-                if (mathDiv.nextSibling) {
-                  mathDiv.parentNode?.insertBefore(trailingP, mathDiv.nextSibling);
-                } else {
-                  mathDiv.parentNode?.appendChild(trailingP);
-                }
-                setCaretInParagraph(trailingP);
-                selectMathElement(mathDiv);
-                inserted = true;
-              } else if (parentBlock && parentBlock !== el && parentBlock.parentNode === el) {
-                const trailingP = createTrailingParagraph();
-                if (activeRange.startOffset === 0 && activeRange.collapsed) {
-                  el.insertBefore(mathDiv, parentBlock);
-                  setCaretInParagraph(parentBlock as HTMLElement);
-                } else {
-                  if (parentBlock.nextSibling) {
-                    el.insertBefore(mathDiv, parentBlock.nextSibling);
-                    el.insertBefore(trailingP, mathDiv.nextSibling);
-                  } else {
-                    el.appendChild(mathDiv);
-                    el.appendChild(trailingP);
-                  }
-                  setCaretInParagraph(trailingP);
-                }
-                selectMathElement(mathDiv);
-                inserted = true;
-              } else {
-                activeRange.deleteContents();
-                activeRange.insertNode(mathDiv);
-                const trailingP = createTrailingParagraph();
-                if (mathDiv.nextSibling) {
-                  mathDiv.parentNode?.insertBefore(trailingP, mathDiv.nextSibling);
-                } else {
-                  el.appendChild(trailingP);
-                }
-                setCaretInParagraph(trailingP);
-                selectMathElement(mathDiv);
-                inserted = true;
-              }
-            } catch {
-              inserted = false;
-            }
-          }
-        }
-
-        // 3. Fallback: append inside editor
-        if (!inserted) {
-          const lastChild = el.lastElementChild;
-          const trailingP = createTrailingParagraph();
-          if (
-            lastChild &&
-            (lastChild.tagName === "P" || lastChild.tagName === "DIV") &&
-            (!lastChild.textContent?.trim() || lastChild.innerHTML === "<br>")
-          ) {
-            lastChild.replaceWith(mathDiv);
-            el.appendChild(trailingP);
-          } else {
-            el.appendChild(mathDiv);
-            el.appendChild(trailingP);
-          }
-          setCaretInParagraph(trailingP);
+        } else {
+          // 2. Otherwise insert at caret, splitting any non-empty paragraph cleanly
+          insertStructuredBlockAtCaret(el, mathDiv, savedRangeRef.current);
           selectMathElement(mathDiv);
-          inserted = true;
         }
 
         triggerChange();
@@ -1199,130 +1304,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
         mathDiv.className = "math-block math-block-themed";
         mathDiv.innerHTML = formatMathBlockInner(trimmed);
 
-        const createTrailingParagraph = () => {
-          const p = document.createElement("p");
-          p.innerHTML = "<br>";
-          return p;
-        };
-
-        const setCaretInParagraph = (p: HTMLElement) => {
-          const sel = window.getSelection();
-          if (sel) {
-            const range = document.createRange();
-            range.setStart(p, 0);
-            range.collapse(true);
-            sel.removeAllRanges();
-            sel.addRange(range);
-            savedRangeRef.current = range.cloneRange();
-          }
-        };
-
-        let inserted = false;
-
-        const getEnclosingMathBlock = (node: Node | null): HTMLElement | null => {
-          let curr: Node | null = node;
-          while (curr && curr !== el) {
-            if (curr.nodeType === 1 && (curr as HTMLElement).classList.contains("math-block")) {
-              return curr as HTMLElement;
-            }
-            curr = curr.parentNode;
-          }
-          return null;
-        };
-
-        const insertAfterElement = (target: HTMLElement) => {
-          if (target.parentNode) {
-            const trailingP = createTrailingParagraph();
-            if (target.nextSibling) {
-              target.parentNode.insertBefore(mathDiv, target.nextSibling);
-              target.parentNode.insertBefore(trailingP, mathDiv.nextSibling);
-            } else {
-              target.parentNode.appendChild(mathDiv);
-              target.parentNode.appendChild(trailingP);
-            }
-            setCaretInParagraph(trailingP);
-            return true;
-          }
-          return false;
-        };
-
-        // Try saved selection first
-        if (savedRangeRef.current && el.contains(savedRangeRef.current.commonAncestorContainer)) {
-          try {
-            const range = savedRangeRef.current;
-            const enclosing =
-              getEnclosingMathBlock(range.commonAncestorContainer) ??
-              getEnclosingMathBlock(range.startContainer);
-            if (enclosing) {
-              inserted = insertAfterElement(enclosing);
-            } else {
-              let targetNode = range.startContainer;
-              if (targetNode.nodeType === 3) targetNode = targetNode.parentNode as Node;
-              const parentBlock = (targetNode as HTMLElement)?.closest?.("p, div");
-              if (
-                parentBlock &&
-                parentBlock !== el &&
-                (!parentBlock.textContent?.trim() || parentBlock.innerHTML === "<br>")
-              ) {
-                const trailingP = createTrailingParagraph();
-                parentBlock.replaceWith(mathDiv);
-                if (mathDiv.nextSibling) {
-                  mathDiv.parentNode?.insertBefore(trailingP, mathDiv.nextSibling);
-                } else {
-                  mathDiv.parentNode?.appendChild(trailingP);
-                }
-                setCaretInParagraph(trailingP);
-                inserted = true;
-              } else if (parentBlock && parentBlock !== el && parentBlock.parentNode === el) {
-                const trailingP = createTrailingParagraph();
-                if (parentBlock.nextSibling) {
-                  el.insertBefore(mathDiv, parentBlock.nextSibling);
-                  el.insertBefore(trailingP, mathDiv.nextSibling);
-                } else {
-                  el.appendChild(mathDiv);
-                  el.appendChild(trailingP);
-                }
-                setCaretInParagraph(trailingP);
-                inserted = true;
-              } else {
-                if (range.cloneContents().querySelector(".math-block")) {
-                  range.collapse(false);
-                }
-                range.deleteContents();
-                range.insertNode(mathDiv);
-                const trailingP = createTrailingParagraph();
-                if (mathDiv.nextSibling) {
-                  mathDiv.parentNode?.insertBefore(trailingP, mathDiv.nextSibling);
-                } else {
-                  el.appendChild(trailingP);
-                }
-                setCaretInParagraph(trailingP);
-                inserted = true;
-              }
-            }
-          } catch {
-            inserted = false;
-          }
-        }
-
-        // Fallback: append inside editor
-        if (!inserted) {
-          const lastChild = el.lastElementChild;
-          const trailingP = createTrailingParagraph();
-          if (
-            lastChild &&
-            (lastChild.tagName === "P" || lastChild.tagName === "DIV") &&
-            (!lastChild.textContent?.trim() || lastChild.innerHTML === "<br>")
-          ) {
-            lastChild.replaceWith(mathDiv);
-            el.appendChild(trailingP);
-          } else {
-            el.appendChild(mathDiv);
-            el.appendChild(trailingP);
-          }
-          setCaretInParagraph(trailingP);
-          inserted = true;
-        }
+        insertStructuredBlockAtCaret(el, mathDiv, savedRangeRef.current);
 
         currentMathElementRef.current = null;
         triggerChange();
@@ -1379,100 +1361,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
           "font-family:sans-serif;font-size:0.82em;color:#047857;white-space:nowrap;";
         graphDiv.innerHTML = formatGraphBlockInner(definition);
 
-        const createTrailingParagraph = () => {
-          const p = document.createElement("p");
-          p.innerHTML = "<br>";
-          return p;
-        };
-
-        const setCaretInParagraph = (p: HTMLElement) => {
-          const sel = window.getSelection();
-          if (sel) {
-            const range = document.createRange();
-            range.setStart(p, 0);
-            range.collapse(true);
-            sel.removeAllRanges();
-            sel.addRange(range);
-            savedRangeRef.current = range.cloneRange();
-          }
-        };
-
-        let inserted = false;
-
-        const getEnclosingBlock = (node: Node | null): HTMLElement | null => {
-          let curr: Node | null = node;
-          while (curr && curr !== el) {
-            if (
-              curr.nodeType === 1 &&
-              ((curr as HTMLElement).classList.contains("math-block") ||
-                (curr as HTMLElement).classList.contains("graph-block"))
-            ) {
-              return curr as HTMLElement;
-            }
-            curr = curr.parentNode;
-          }
-          return null;
-        };
-
-        if (savedRangeRef.current && el.contains(savedRangeRef.current.commonAncestorContainer)) {
-          try {
-            const range = savedRangeRef.current;
-            const enclosing =
-              getEnclosingBlock(range.commonAncestorContainer) ??
-              getEnclosingBlock(range.startContainer);
-            if (enclosing && enclosing.parentNode) {
-              const trailingP = createTrailingParagraph();
-              if (enclosing.nextSibling) {
-                enclosing.parentNode.insertBefore(graphDiv, enclosing.nextSibling);
-                enclosing.parentNode.insertBefore(trailingP, graphDiv.nextSibling);
-              } else {
-                enclosing.parentNode.appendChild(graphDiv);
-                enclosing.parentNode.appendChild(trailingP);
-              }
-              setCaretInParagraph(trailingP);
-              inserted = true;
-            } else {
-              let targetNode = range.startContainer;
-              if (targetNode.nodeType === 3) targetNode = targetNode.parentNode as Node;
-              const parentBlock = (targetNode as HTMLElement)?.closest?.("p, div");
-              if (
-                parentBlock &&
-                parentBlock !== el &&
-                (!parentBlock.textContent?.trim() || parentBlock.innerHTML === "<br>")
-              ) {
-                const trailingP = createTrailingParagraph();
-                parentBlock.replaceWith(graphDiv);
-                if (graphDiv.nextSibling) {
-                  graphDiv.parentNode?.insertBefore(trailingP, graphDiv.nextSibling);
-                } else {
-                  graphDiv.parentNode?.appendChild(trailingP);
-                }
-                setCaretInParagraph(trailingP);
-                inserted = true;
-              }
-            }
-          } catch {
-            inserted = false;
-          }
-        }
-
-        if (!inserted) {
-          const lastChild = el.lastElementChild;
-          const trailingP = createTrailingParagraph();
-          if (
-            lastChild &&
-            (lastChild.tagName === "P" || lastChild.tagName === "DIV") &&
-            (!lastChild.textContent?.trim() || lastChild.innerHTML === "<br>")
-          ) {
-            lastChild.replaceWith(graphDiv);
-            el.appendChild(trailingP);
-          } else {
-            el.appendChild(graphDiv);
-            el.appendChild(trailingP);
-          }
-          setCaretInParagraph(trailingP);
-          inserted = true;
-        }
+        insertStructuredBlockAtCaret(el, graphDiv, savedRangeRef.current);
 
         triggerChange();
         updateFormatState();
@@ -1953,7 +1842,10 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
               onMathBlockClick?.(latex, mathBlock);
             }
           }}
-          onBlur={saveSelection}
+          onBlur={() => {
+            isFocusedRef.current = false;
+            saveSelection();
+          }}
           onKeyUp={() => {
             saveSelection();
             updateFormatState();
@@ -1963,6 +1855,7 @@ export const RichContentEditor = forwardRef<RichContentEditorHandle, RichContent
             updateFormatState();
           }}
           onFocus={() => {
+            isFocusedRef.current = true;
             updateFormatState();
           }}
           onMouseDown={(e) => {

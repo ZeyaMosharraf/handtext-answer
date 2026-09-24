@@ -173,7 +173,7 @@ console.log("\n=== Math Insertion Lifecycle & Non-Regression Tests ===\n");
 {
   // Simulated state machine for modal
   type Mode = "insert" | "edit";
-  let mode: Mode = "insert";
+  let mode: string = "insert";
   let targetElement: string | null = null;
 
   // Clicking a math block explicitly sets edit mode with that target
@@ -264,7 +264,7 @@ console.log("\n=== Math Insertion Lifecycle & Non-Regression Tests ===\n");
 {
   const html = `<p><strong>Bold</strong> and <em>italic</em></p><div class="math-block" data-latex="x^2 + y^2 = r^2"></div>`;
   const blocks = parseContent(html);
-  assert(blocks[0]?.segs?.some((s) => s.bold), "Regression: Bold preserved alongside math");
+  assert(Boolean(blocks[0]?.segs?.some((s) => s.bold)), "Regression: Bold preserved alongside math");
   assert(blocks[1]?.kind === "math", "Regression: Math block intact");
 
   const tableHtml = `

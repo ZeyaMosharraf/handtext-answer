@@ -47,7 +47,7 @@ import {
   type HandwritingSettings,
   type PageCoordinateSystem,
 } from "@/lib/handwriting";
-import { htmlToPlainText, migrateLegacyContentToHtml, plainTextToHtml } from "@/lib/handwriting/parse";
+import { htmlToPlainText, migrateLegacyContentToHtml, updateContentFromPlainText } from "@/lib/handwriting/parse";
 import {
   getUserUsage,
   recordUsage,
@@ -261,10 +261,25 @@ export function EditorWorkspace({ project }: { project: Project }) {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       const key = e.key.toLowerCase();
-      if (key === "z") {
-        e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
+      if (key === "z" || key === "y") {
+        // If user is focused inside a contentEditable editor, let browser's native text undo stack operate
+        const active = typeof document !== "undefined" ? document.activeElement : null;
+        const isInsideEditor =
+          active &&
+          (active.getAttribute("contenteditable") === "true" ||
+            active.closest?.('[contenteditable="true"]') !== null);
+        if (isInsideEditor) {
+          return;
+        }
+
+        if (key === "z") {
+          e.preventDefault();
+          if (e.shiftKey) redo();
+          else undo();
+        } else if (key === "y") {
+          e.preventDefault();
+          redo();
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -735,7 +750,7 @@ export function EditorWorkspace({ project }: { project: Project }) {
                         ref={onPageRef}
                         value={htmlToPlainText(content)}
                         onChange={(e) => {
-                          const nextHtml = plainTextToHtml(e.target.value);
+                          const nextHtml = updateContentFromPlainText(content, e.target.value);
                           commit((p) => ({ ...p, content: nextHtml }));
                           scheduleRender(true);
                         }}

@@ -19,7 +19,7 @@ export const Route = createFileRoute("/auth")({
   }),
   validateSearch: (search: Record<string, unknown>): { next?: string; reset?: boolean } => {
     const next = typeof search["next"] === "string" ? search["next"] : "";
-    const reset = search["reset"] === true || search["reset"] === "true";
+    const reset = search["reset"] === true || search["reset"] === "true" || search["type"] === "recovery";
     return {
       ...(next.startsWith("/") && !next.startsWith("//") ? { next } : {}),
       ...(reset ? { reset: true } : {}),
@@ -150,8 +150,25 @@ function AuthPage() {
     }
     setBusy(true);
     try {
+      if (!user) {
+        toast.error("Your recovery session has expired or is invalid. Please request a new reset link.");
+        setMode("forgot");
+        return;
+      }
       const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) throw error;
+      if (error) {
+        if (
+          error.message.toLowerCase().includes("session") ||
+          error.message.toLowerCase().includes("auth") ||
+          (error as { status?: number }).status === 401 ||
+          (error as { status?: number }).status === 403
+        ) {
+          toast.error("Your recovery session has expired or is invalid. Please request a new reset link.");
+          setMode("forgot");
+          return;
+        }
+        throw error;
+      }
       toast.success("Password updated successfully! Welcome back.");
       navigate({ to: "/dashboard" });
     } catch (err) {
@@ -188,6 +205,22 @@ function AuthPage() {
               <p className="mt-1 text-sm text-muted-foreground">
                 Enter and confirm your new password below.
               </p>
+
+              {!loading && !user && (
+                <div className="mt-4 rounded-md bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-amber-700 dark:text-amber-400">
+                  <p className="font-semibold">No active recovery session detected</p>
+                  <p className="mt-1 text-muted-foreground">
+                    This password reset link is expired or invalid. Please request a new link.
+                  </p>
+                  <button
+                    type="button"
+                    className="mt-2 text-xs font-semibold text-primary underline cursor-pointer"
+                    onClick={() => setMode("forgot")}
+                  >
+                    Request a new reset link
+                  </button>
+                </div>
+              )}
 
               <form onSubmit={handleUpdatePassword} className="mt-5 space-y-4">
                 <div className="space-y-1.5">

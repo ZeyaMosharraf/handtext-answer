@@ -211,7 +211,7 @@ console.log("\n=== 8. Copied Block Gets Independent Color State ===");
   const pastedMb = createPastedMathBlock(payload);
 
   let doc: DocumentBlock[] = [originalMb, pastedMb];
-  assert(doc[0].id !== doc[1].id, "Original and pasted have different IDs");
+  assert(doc[0]?.id !== doc[1]?.id, "Original and pasted have different IDs");
   assert((doc[0] as MathBlock).color === "#b3231f", "Original starts Red");
   assert((doc[1] as MathBlock).color === "#b3231f", "Pasted starts Red");
 
@@ -230,7 +230,7 @@ console.log("\n=== 9. Legacy MathBlock Without Color (Backward Compatibility) ==
   const legacyHtml = '<div class="math-block" data-latex="Y_1 = 2Z_1 - Z_2">Y_1 = 2Z_1 - Z_2</div>';
   const parsed = htmlToBlocks(legacyHtml);
   assert(parsed.length === 1, "Parsed legacy HTML into 1 block");
-  assert(parsed[0].type === "math", "Parsed block type is math");
+  assert(parsed[0]?.type === "math", "Parsed block type is math");
   const mb = parsed[0] as MathBlock;
   assert(mb.color === undefined, "Legacy math block has color = undefined");
   assert(mb.latex === "Y_1 = 2Z_1 - Z_2", "Legacy latex correctly extracted");
@@ -238,8 +238,8 @@ console.log("\n=== 9. Legacy MathBlock Without Color (Backward Compatibility) ==
   // Verify handwriting parse handles legacy HTML
   const parsedHandwriting = parseHtmlContent(legacyHtml);
   assert(parsedHandwriting.length === 1, "Handwriting parsed legacy HTML into 1 block");
-  assert(parsedHandwriting[0].kind === "math", "Handwriting block kind is math");
-  assert(parsedHandwriting[0].math?.color === undefined, "Handwriting mathData color is undefined (will use default ink)");
+  assert(parsedHandwriting[0]?.kind === "math", "Handwriting block kind is math");
+  assert(parsedHandwriting[0]?.math?.color === undefined, "Handwriting mathData color is undefined (will use default ink)");
 }
 
 console.log("\n=== 10. RIGHT Handwritten Pipeline Receives Selected Color ===");
@@ -255,24 +255,24 @@ console.log("\n=== 10. RIGHT Handwritten Pipeline Receives Selected Color ===");
   // 1. parseHtmlContent
   const blocks = parseHtmlContent(htmlWithColors);
   assert(blocks.length === 4, "Parsed 4 math blocks for handwriting");
-  assert(blocks[0].math?.color === "#1d3fb5", "Block 1 parsed with Blue color (#1d3fb5)");
-  assert(blocks[1].math?.color === "#b3231f", "Block 2 parsed with Red color (#b3231f)");
-  assert(blocks[2].math?.color === "#146b3a", "Block 3 parsed with Green color (#146b3a)");
-  assert(blocks[3].math?.color === undefined, "Block 4 parsed with undefined color (default legacy)");
+  assert(blocks[0]?.math?.color === "#1d3fb5", "Block 1 parsed with Blue color (#1d3fb5)");
+  assert(blocks[1]?.math?.color === "#b3231f", "Block 2 parsed with Red color (#b3231f)");
+  assert(blocks[2]?.math?.color === "#146b3a", "Block 3 parsed with Green color (#146b3a)");
+  assert(blocks[3]?.math?.color === undefined, "Block 4 parsed with undefined color (default legacy)");
 
   // 2. layoutDocument
   const layoutDoc = layoutDocument(ctx, { content: htmlWithColors, settings: DEFAULT_SETTINGS });
   assert(layoutDoc.pages.length >= 1, "Layout document has at least 1 page");
 
-  const placements = layoutDoc.pages[0].placements.filter(
+  const placements = (layoutDoc.pages[0]?.placements ?? []).filter(
     (p): p is Extract<LayoutPage["placements"][number], { type: "mathBlock" }> => p.type === "mathBlock"
   );
 
   assert(placements.length === 4, "Page 1 contains all 4 math block placements");
-  assert(placements[0].color === "#1d3fb5", "Placement 1 carries Blue color (#1d3fb5)");
-  assert(placements[1].color === "#b3231f", "Placement 2 carries Red color (#b3231f)");
-  assert(placements[2].color === "#146b3a", "Placement 3 carries Green color (#146b3a)");
-  assert(placements[3].color === undefined, "Placement 4 has undefined color (tracks default ink)");
+  assert(placements[0]?.color === "#1d3fb5", "Placement 1 carries Blue color (#1d3fb5)");
+  assert(placements[1]?.color === "#b3231f", "Placement 2 carries Red color (#b3231f)");
+  assert(placements[2]?.color === "#146b3a", "Placement 3 carries Green color (#146b3a)");
+  assert(placements[3]?.color === undefined, "Placement 4 has undefined color (tracks default ink)");
 }
 
 console.log("\n══════════════════════════════════════════════════");

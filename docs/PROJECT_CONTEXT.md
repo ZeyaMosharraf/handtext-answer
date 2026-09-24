@@ -315,7 +315,7 @@ Cloud synchronization represents an **explicit checkpoint**:
 - **Supported Methods**:
   1. **Email & Password**: Direct signup and signin.
   2. **Google OAuth**: Redirects through Supabase callback to `/auth`.
-  3. **Password Reset / Recovery**: Full recovery flow via `supabase.auth.resetPasswordForEmail()` with `redirectTo: /auth?type=recovery`. Supports password change screen when active session has `recovery` type.
+  3. **Password Reset / Recovery**: Full recovery flow via `supabase.auth.resetPasswordForEmail()` with canonical `redirectTo: /auth?reset=true` (and backwards-compatible `?type=recovery`). Supports password change screen when active session has recovery status.
 - **Route Guards**:
   - TanStack Router `_authenticated/route.tsx` validates session via `supabase.auth.getUser()`. Unauthenticated requests redirect to `/auth`.
 

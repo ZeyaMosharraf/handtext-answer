@@ -1,5 +1,15 @@
-import { parseContent, getTableCellText, getTableCellSegs, segText, type Block, type BlockKind, type Seg, type TableCellData } from "./parse";
-import type { MarginMarker } from "@/types/document";
+import {
+  parseContent,
+  toHandwritingBlocks,
+  getTableCellText,
+  getTableCellSegs,
+  segText,
+  type Block,
+  type BlockKind,
+  type Seg,
+  type TableCellData,
+} from "./parse";
+import type { MarginMarker, DocumentBlock } from "@/types/document";
 import {
   formatPageNumber,
   pageDimensions,
@@ -395,9 +405,10 @@ function activeCoordinateSystem(
 
   // Margin rule alignment
   const isAnswerMarginEnabled = settings.page.answerMargin?.enabled ?? true;
+  const answerMarginWidth = settings.page.answerMargin?.width ?? 72;
   const marginRuleX = settings.page.margin.enabled
     ? settings.page.margin.position
-    : (isAnswerMarginEnabled && (settings.page.answerMargin?.showDivider !== false) ? 100 : 0);
+    : (isAnswerMarginEnabled && (settings.page.answerMargin?.showDivider !== false) ? answerMarginWidth : 0);
   const marginRuleRight = marginRuleX > 0 ? marginRuleX + 24 : 48;
   const contentLeft = Math.max(settings.marginLeft, marginRuleRight);
   const contentRight = w - Math.max(48, settings.marginRight);
@@ -626,7 +637,7 @@ function mathFlowBlock(
 
   // Parse and layout the math to determine its physical height
   const ast = parseMath(latex);
-  const box = layoutMath(ast, ctx, settings, 1.0);
+  const box = layoutMath(ast, ctx, settings, 1.0, latex);
 
   const coords = {
     rulingSpacing: settings.fontSize * settings.lineSpacing,
@@ -652,7 +663,7 @@ function graphFlowBlock(
 
 function buildFlow(
   ctx: CanvasRenderingContext2D,
-  content: string,
+  content: string | Block[] | DocumentBlock[],
   question: string | undefined,
   settings: HandwritingSettings,
   contentWidth: number,
@@ -664,7 +675,7 @@ function buildFlow(
     blocks.push({ kind: "blank", text: "" });
     blocks.push({ kind: "subheading", text: "Answer", segs: plainSegments("Answer") });
   }
-  blocks.push(...parseContent(content));
+  blocks.push(...toHandwritingBlocks(content));
 
   const flow: FlowItem[] = [];
   let pendingGapLines = 0;
@@ -841,7 +852,7 @@ function paginate(
 
 export function layoutDocument(
   ctx: CanvasRenderingContext2D,
-  input: { question?: string; content: string; settings: HandwritingSettings },
+  input: { question?: string; content: string | Block[] | DocumentBlock[]; settings: HandwritingSettings },
 ): LayoutDocument {
   const firstCoordinates = activeCoordinateSystem(input.settings, ctx, 1, 1);
   const contentWidth = firstCoordinates.contentRight - firstCoordinates.contentLeft;

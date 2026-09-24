@@ -221,9 +221,9 @@ Some normal paragraph text with **bold** and *italic*.
 </table>`;
   const doc = layoutDocument(ctx, { content: veryWideContentTable, settings });
   const tableRows = doc.pages[0]?.placements.filter((p) => p.type === "tableRow") as any[];
-  const colWidths = tableRows[0].columnWidths as number[];
+  const colWidths = (tableRows[0]?.columnWidths ?? []) as number[];
   const totalTableWidth = colWidths.reduce((sum, w) => sum + w, 0);
-  const contentWidth = doc.pages[0].coordinates.contentRight - doc.pages[0].coordinates.contentLeft;
+  const contentWidth = (doc.pages[0]?.coordinates.contentRight ?? 0) - (doc.pages[0]?.coordinates.contentLeft ?? 0);
   assert(Math.abs(totalTableWidth - contentWidth) < 0.001, "Total table width strictly matches constrained A4 content width");
 }
 

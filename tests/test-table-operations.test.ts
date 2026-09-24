@@ -203,23 +203,23 @@ function assert(condition: boolean, testName: string, detail?: string) {
 {
   const table = createMockTable(2, 2);
   insertTableColumn(table, 0, "right");
-  assert(table.rows[0].cells.length === 3, "Header has 3 columns after insertTableColumn right");
-  assert(table.rows[1].cells.length === 3, "Body row has 3 columns after insertTableColumn right");
+  assert(table.rows[0]?.cells.length === 3, "Header has 3 columns after insertTableColumn right");
+  assert(table.rows[1]?.cells.length === 3, "Body row has 3 columns after insertTableColumn right");
 }
 
 // 6. Insert Column Left
 {
   const table = createMockTable(2, 2);
   insertTableColumn(table, 0, "left");
-  assert(table.rows[0].cells.length === 3, "Header has 3 columns after insertTableColumn left");
+  assert(table.rows[0]?.cells.length === 3, "Header has 3 columns after insertTableColumn left");
 }
 
 // 7. Delete Column
 {
   const table = createMockTable(2, 3);
   deleteTableColumn(table, 1);
-  assert(table.rows[0].cells.length === 2, "Header has 2 columns after deleteTableColumn");
-  assert(table.rows[1].cells.length === 2, "Body row has 2 columns after deleteTableColumn");
+  assert(table.rows[0]?.cells.length === 2, "Header has 2 columns after deleteTableColumn");
+  assert(table.rows[1]?.cells.length === 2, "Body row has 2 columns after deleteTableColumn");
 }
 
 // 8. Delete Column Safety (removes table if last column deleted)
@@ -233,7 +233,10 @@ function assert(condition: boolean, testName: string, detail?: string) {
 {
   const table = createMockTable(2, 2);
   let appliedAlignment = "";
-  table.rows[0].cells[1].setAttribute = (_k: string, v: string) => { appliedAlignment = v; };
+  const targetCell = table.rows[0]?.cells[1];
+  if (targetCell) {
+    targetCell.setAttribute = (_k: string, v: string) => { appliedAlignment = v; };
+  }
   setTableColumnAlignment(table, 1, "center");
   assert(appliedAlignment === "center", "Column alignment applied 'center' to target column");
 }
